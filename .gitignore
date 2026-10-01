@@ -1,7 +1,12 @@
+# Node & Frontend
+node_modules/
+dist/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
 *$py.class
+*.pyc
 
 # C extensions
 *.so
@@ -10,7 +15,6 @@ __pycache__/
 .Python
 build/
 develop-eggs/
-dist/
 downloads/
 eggs/
 .eggs/
@@ -31,12 +35,13 @@ MANIFEST
 venv/
 ENV/
 env/
-.env.local
 
 # Environment variables & secrets
 .env
+.env.local
 *.env
 !.env.example
+!server/.env.example
 
 # Models, checkpoints & vector data
 models/

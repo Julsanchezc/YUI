@@ -1,0 +1,17 @@
+{
+  "name": "yui-companion",
+  "version": "1.0.0",
+  "description": "A delightful screen notch companion agent powered by Google Gemini with live voice, thinking, and tools.",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "server": "python3 server/agent_server.py"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "typescript": "^5.4.5",
+    "vite": "^5.2.11"
+  }
+}

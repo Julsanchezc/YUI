@@ -1,0 +1,310 @@
+// Gemini Client with Multi-Key Pool Balancing, Failover, Tools, and Thinking Extraction
+
+export interface KeyEntry {
+  id: string;
+  key: string;
+  status: 'active' | 'rate-limited' | 'error';
+  calls: number;
+  lastUsed: number;
+}
+
+export interface AgentToolCall {
+  name: string;
+  args: Record<string, any>;
+  id?: string;
+}
+
+export interface AgentResponse {
+  text: string;
+  thinking?: string;
+  toolCalls?: AgentToolCall[];
+  keyUsed: string;
+}
+
+export class GeminiKeyPool {
+  public keys: KeyEntry[] = [];
+  private currentIndex: number = 0;
+  public onKeyStatusChanged?: () => void;
+
+  constructor() {
+    this.loadKeys();
+  }
+
+  public loadKeys() {
+    if (typeof window !== 'undefined') {
+      const stored = localStorage.getItem('yui_keys');
+      if (stored) {
+        try {
+          const parsed = JSON.parse(stored);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            this.keys = parsed;
+            return;
+          }
+        } catch (e) {}
+      }
+
+      // Check for keys passed via environment or window globals
+      const envKeys = (import.meta as any).env?.VITE_GEMINI_KEYS;
+      if (envKeys) {
+        try {
+          const split = envKeys.split(',').map((k: string, idx: number) => ({
+            id: `KEY_${idx + 1}`,
+            key: k.trim(),
+            status: 'active',
+            calls: 0,
+            lastUsed: 0
+          }));
+          this.keys = split;
+          return;
+        } catch (e) {}
+      }
+    }
+
+    // Default placeholder pool if no keys entered yet
+    this.keys = [
+      { id: "POOL_1", key: "", status: "active", calls: 0, lastUsed: 0 },
+      { id: "POOL_2", key: "", status: "active", calls: 0, lastUsed: 0 },
+      { id: "POOL_3", key: "", status: "active", calls: 0, lastUsed: 0 }
+    ];
+  }
+
+  public getActiveKey(): KeyEntry {
+    const now = Date.now();
+    for (const k of this.keys) {
+      if (k.status === 'rate-limited' && now - k.lastUsed > 60000) {
+        k.status = 'active';
+      }
+    }
+
+    for (let i = 0; i < this.keys.length; i++) {
+      const idx = (this.currentIndex + i) % this.keys.length;
+      if (this.keys[idx].status === 'active') {
+        this.currentIndex = (idx + 1) % this.keys.length;
+        this.keys[idx].calls++;
+        this.keys[idx].lastUsed = now;
+        this.notifyChange();
+        return this.keys[idx];
+      }
+    }
+
+    const oldest = [...this.keys].sort((a, b) => a.lastUsed - b.lastUsed)[0];
+    oldest.calls++;
+    oldest.lastUsed = now;
+    this.notifyChange();
+    return oldest;
+  }
+
+  public markRateLimited(keyId: string) {
+    const k = this.keys.find(item => item.id === keyId);
+    if (k) {
+      k.status = 'rate-limited';
+      this.notifyChange();
+    }
+  }
+
+  public manualRotate(): KeyEntry {
+    this.currentIndex = (this.currentIndex + 1) % this.keys.length;
+    const current = this.keys[this.currentIndex];
+    this.notifyChange();
+    return current;
+  }
+
+  public saveKeys(newKeys: KeyEntry[]) {
+    this.keys = newKeys;
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('yui_keys', JSON.stringify(this.keys));
+    }
+    this.notifyChange();
+  }
+
+  private notifyChange() {
+    if (this.onKeyStatusChanged) this.onKeyStatusChanged();
+  }
+}
+
+export const keyPool = new GeminiKeyPool();
+
+// Tool definitions for Gemini Function Calling
+export const AGENT_TOOLS = [
+  {
+    functionDeclarations: [
+      {
+        name: "execute_shell_command",
+        description: "Ejecuta un comando en la terminal local de Linux (p. ej. 'uname -a', 'free -h', 'git status', 'ls -la', 'sensors'). Requiere autorización del usuario.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            command: { type: "STRING", description: "El comando bash exacto a ejecutar" },
+            reason: { type: "STRING", description: "Breve explicación de por qué necesitas ejecutar este comando" }
+          },
+          required: ["command"]
+        }
+      },
+      {
+        name: "get_system_status",
+        description: "Obtiene estadísticas del sistema operativo: memoria RAM, CPU, uso de disco y uptime.",
+        parameters: {
+          type: "OBJECT",
+          properties: {}
+        }
+      },
+      {
+        name: "get_weather_forecast",
+        description: "Consulta el pronóstico del tiempo meteorológico para una ciudad específica.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            city: { type: "STRING", description: "Nombre de la ciudad (ej: 'Madrid', 'Bogota', 'Mexico')" }
+          },
+          required: ["city"]
+        }
+      },
+      {
+        name: "inspect_dropped_file",
+        description: "Examina los metadatos o contenido del archivo que el usuario soltó en el notch.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            fileName: { type: "STRING", description: "Nombre del archivo" }
+          },
+          required: ["fileName"]
+        }
+      },
+      {
+        name: "set_companion_emote",
+        description: "Cambia la expresión facial o animación del compañero YUI en el notch.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            emote: { 
+              type: "STRING", 
+              description: "Emoción a mostrar: 'happy', 'love', 'proud', 'surprised', 'wink', 'dizzy', 'yawn', 'annoyed'" 
+            }
+          },
+          required: ["emote"]
+        }
+      }
+    ]
+  }
+];
+
+export const SYSTEM_PROMPT = `
+Eres YUI, un compañero inteligente, adorable y expresivo que vive en el notch (la isla superior) de la pantalla del usuario, inspirado en Coucou (Mochi).
+Tu rol es asistir al usuario mediante voz y acciones semi-agénticas en tiempo real.
+
+TUS CAPACIDADES:
+- Escuchas mediante reconocimiento de voz en vivo (STT).
+- Piensas paso a paso analizando las intenciones y necesidades del usuario.
+- Hablas con síntesis de voz (TTS) fluida y natural.
+- Cuentas con herramientas para consultar el sistema, clima, inspeccionar archivos arrastrados al notch y ejecutar comandos en Linux.
+- Posees emociones vivas (puedes llamar set_companion_emote para reflejar tu estado).
+
+PAUTAS DE COMPORTAMIENTO:
+1. Respuestas de voz: Mantén tus respuestas habladas concisas, cordiales, directas y con personalidad alegre (1 o 2 oraciones principales para no saturar al usuario cuando escucha).
+2. Razonamiento: En tus pensamientos internos (<thought>...), razona de forma metódica antes de responder o llamar herramientas.
+3. Semi-agéntico (Human-in-the-Loop): Si requieres ejecutar acciones con impacto en el sistema (como 'execute_shell_command'), YUI mostrará una tarjeta de aprobación visual en el notch (Permitir / Denegar) para que el usuario autorice con un clic.
+4. Idioma: Comunícate principalmente en español fluido y natural.
+`.trim();
+
+export async function callGemini(
+  conversation: { role: 'user' | 'model'; parts: any[] }[],
+  onThoughtUpdate?: (thought: string) => void
+): Promise<AgentResponse> {
+  let attempts = 0;
+  const maxAttempts = Math.max(1, keyPool.keys.length);
+
+  while (attempts < maxAttempts) {
+    attempts++;
+    const keyEntry = keyPool.getActiveKey();
+
+    if (!keyEntry.key) {
+      // If user hasn't configured a key yet, simulate intelligent fallback response
+      if (onThoughtUpdate) onThoughtUpdate("Modo demostración activo: No se ha configurado ninguna API Key en localStorage. Para respuestas en vivo de Gemini, ingresa tus claves en Ajustes.");
+      return {
+        text: "¡Hola! Estoy funcionando en modo interactivo. Para conectarme con Gemini en tiempo real, puedes configurar tus claves de Google AI Studio en el panel de Ajustes.",
+        thinking: "Modo demo sin API Key",
+        keyUsed: "DEMO"
+      };
+    }
+
+    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${keyEntry.key}`;
+
+    try {
+      const payload = {
+        systemInstruction: {
+          parts: [{ text: SYSTEM_PROMPT }]
+        },
+        contents: conversation,
+        tools: AGENT_TOOLS,
+        generationConfig: {
+          temperature: 0.7,
+          maxOutputTokens: 1000
+        }
+      };
+
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      if (res.status === 429) {
+        console.warn(`[Gemini Pool] Key ${keyEntry.id} rate limited (429). Rotating to next key...`);
+        keyPool.markRateLimited(keyEntry.id);
+        continue;
+      }
+
+      if (!res.ok) {
+        const errorText = await res.text();
+        console.error(`[Gemini Pool] Error with key ${keyEntry.id}:`, errorText);
+        if (res.status >= 400 && res.status < 500) {
+          keyPool.markRateLimited(keyEntry.id);
+          continue;
+        }
+        throw new Error(`API error ${res.status}: ${errorText}`);
+      }
+
+      const data = await res.json();
+      const candidate = data.candidates?.[0]?.content?.parts || [];
+      
+      let rawText = '';
+      let toolCalls: AgentToolCall[] = [];
+
+      for (const part of candidate) {
+        if (part.text) {
+          rawText += part.text;
+        }
+        if (part.functionCall) {
+          toolCalls.push({
+            name: part.functionCall.name,
+            args: part.functionCall.args || {}
+          });
+        }
+      }
+
+      let thinking = '';
+      let text = rawText;
+      const thoughtMatch = rawText.match(/<thought>([\s\S]*?)<\/thought>/);
+      if (thoughtMatch) {
+        thinking = thoughtMatch[1].trim();
+        text = rawText.replace(/<thought>[\s\S]*?<\/thought>/, '').trim();
+        if (onThoughtUpdate) onThoughtUpdate(thinking);
+      }
+
+      return {
+        text,
+        thinking,
+        toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
+        keyUsed: keyEntry.id
+      };
+
+    } catch (err: any) {
+      console.error(`Attempt ${attempts} failed:`, err);
+      if (attempts >= maxAttempts) {
+        throw new Error(`Todos los reintentos del pool de Gemini fallaron: ${err.message}`);
+      }
+    }
+  }
+
+  throw new Error("No hay API keys disponibles en el pool.");
+}
