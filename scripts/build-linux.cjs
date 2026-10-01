@@ -51,8 +51,11 @@ async function build() {
 
   // 4. Empaquetar con ASAR
   const asarDest = path.join(OUTPUT_DIR, 'app.asar');
+  const binAsarDest = path.join(BIN_DIR, 'app.asar');
   console.log(`📦 Creando paquete ASAR en: ${asarDest}`);
   await asar.createPackage(STAGING_DIR, asarDest);
+  fs.copyFileSync(asarDest, binAsarDest);
+  console.log(`📦 Copiado respaldo ASAR en: ${binAsarDest}`);
 
   // 5. Crear script ejecutable lanzador
   const launcherContent = `#!/usr/bin/env bash
@@ -61,6 +64,13 @@ set -e
 # Base directory
 SCRIPT_DIR="$(cd "$(dirname "\${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "\$SCRIPT_DIR/.." && pwd)"
+
+# Clean stale singleton locks if no electron process running YUI is alive
+RUNNING_YUI=$(pgrep -f "electron.*(yui|app\\.asar)" 2>/dev/null || true)
+if [ -z "$RUNNING_YUI" ]; then
+  rm -f "$HOME/.config/yui-companion/SingletonLock" "$HOME/.config/yui-companion/SingletonSocket" "$HOME/.config/yui-companion/SingletonCookie" 2>/dev/null || true
+  rm -f "$HOME/.config/Electron/SingletonLock" "$HOME/.config/Electron/SingletonSocket" "$HOME/.config/Electron/SingletonCookie" 2>/dev/null || true
+fi
 
 # Target ASAR package
 ASAR_PATH="\$PROJECT_ROOT/dist/yui-linux/app.asar"

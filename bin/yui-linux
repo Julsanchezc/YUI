@@ -5,6 +5,13 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
+# Clean stale singleton locks if no electron process running YUI is alive
+RUNNING_YUI=$(pgrep -f "electron.*(yui|app\.asar)" 2>/dev/null || true)
+if [ -z "$RUNNING_YUI" ]; then
+  rm -f "$HOME/.config/yui-companion/SingletonLock" "$HOME/.config/yui-companion/SingletonSocket" "$HOME/.config/yui-companion/SingletonCookie" 2>/dev/null || true
+  rm -f "$HOME/.config/Electron/SingletonLock" "$HOME/.config/Electron/SingletonSocket" "$HOME/.config/Electron/SingletonCookie" 2>/dev/null || true
+fi
+
 # Target ASAR package
 ASAR_PATH="$PROJECT_ROOT/dist/yui-linux/app.asar"
 if [ ! -f "$ASAR_PATH" ]; then

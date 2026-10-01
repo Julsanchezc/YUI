@@ -1,6 +1,41 @@
 const { app, BrowserWindow, screen, ipcMain } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const { exec } = require('child_process');
+
+// Set application identity
+app.setName('yui-companion');
+if (process.platform === 'win32') {
+  app.setAppUserModelId('yui-companion');
+}
+
+// Clean stale Chromium SingletonLock if the PID is dead
+function cleanStaleSingletonLock() {
+  try {
+    const userData = app.getPath('userData');
+    const lockPath = path.join(userData, 'SingletonLock');
+    if (fs.existsSync(lockPath)) {
+      try {
+        const link = fs.readlinkSync(lockPath);
+        const match = link.match(/-(\d+)$/);
+        if (match) {
+          const pid = parseInt(match[1], 10);
+          try {
+            process.kill(pid, 0);
+          } catch (e) {
+            if (e.code === 'ESRCH') {
+              fs.unlinkSync(lockPath);
+              const socketPath = path.join(userData, 'SingletonSocket');
+              if (fs.existsSync(socketPath)) fs.unlinkSync(socketPath);
+            }
+          }
+        }
+      } catch (err) {}
+    }
+  } catch (err) {}
+}
+
+cleanStaleSingletonLock();
 
 // Dimensions for the Dynamic Island Notch
 const SIZES = {
@@ -25,6 +60,7 @@ function createWindow() {
   const bounds = getWindowBounds(currentMode);
 
   mainWindow = new BrowserWindow({
+    title: "YUI — Notch Companion Agent",
     x: bounds.x,
     y: bounds.y,
     width: bounds.width,
@@ -32,9 +68,10 @@ function createWindow() {
     frame: false,
     transparent: true,
     alwaysOnTop: true,
-    skipTaskbar: true,
+    skipTaskbar: false,
     resizable: false,
     hasShadow: false,
+    show: false,
     backgroundColor: '#00000000',
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
@@ -44,9 +81,23 @@ function createWindow() {
     }
   });
 
-  // Make sure it stays on top on all workspaces / full screen
-  mainWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
-  mainWindow.setAlwaysOnTop(true, 'screen-saver');
+  mainWindow.once('ready-to-show', () => {
+    mainWindow.show();
+    mainWindow.focus();
+
+    // In Sway, position window flush at top center
+    if (process.platform === 'linux' && process.env.WAYLAND_DISPLAY) {
+      exec(`swaymsg '[app_id="yui-companion"] move position ${bounds.x} px 0 px'`, () => {});
+    }
+  });
+
+  // Stay on top
+  if (process.platform === 'darwin') {
+    mainWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+    mainWindow.setAlwaysOnTop(true, 'screen-saver');
+  } else {
+    mainWindow.setAlwaysOnTop(true);
+  }
 
   // Load production dist or dev server
   const devUrl = process.env.VITE_DEV_SERVER_URL;
@@ -73,6 +124,11 @@ function createWindow() {
     currentMode = mode;
     const newBounds = getWindowBounds(mode);
     mainWindow.setBounds(newBounds, true);
+
+    // On Sway, ensure x position is re-centered when width expands/collapses
+    if (process.platform === 'linux' && process.env.WAYLAND_DISPLAY) {
+      exec(`swaymsg '[app_id="yui-companion"] move position ${newBounds.x} px 0 px'`, () => {});
+    }
   });
 
   ipcMain.on('yui:resize', (event, { width, height }) => {
@@ -81,6 +137,10 @@ function createWindow() {
     const { width: screenWidth } = primaryDisplay.workAreaSize;
     const x = Math.round((screenWidth - width) / 2);
     mainWindow.setBounds({ x, y: 0, width, height }, true);
+
+    if (process.platform === 'linux' && process.env.WAYLAND_DISPLAY) {
+      exec(`swaymsg '[app_id="yui-companion"] move position ${x} px 0 px'`, () => {});
+    }
   });
 
   ipcMain.on('yui:close', () => {
@@ -89,7 +149,11 @@ function createWindow() {
 
   ipcMain.on('yui:minimize', () => {
     if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.minimize();
+      if (process.platform === 'linux' && process.env.WAYLAND_DISPLAY) {
+        exec('swaymsg \'[app_id="yui-companion"] move scratchpad\'', () => {});
+      } else {
+        mainWindow.minimize();
+      }
     }
   });
 
@@ -105,6 +169,10 @@ if (!gotTheLock) {
 } else {
   app.on('second-instance', () => {
     if (mainWindow) {
+      if (process.platform === 'linux' && process.env.WAYLAND_DISPLAY) {
+        exec('swaymsg \'[app_id="yui-companion"] scratchpad show, sticky enable, focus\'', () => {});
+      }
+      if (!mainWindow.isVisible()) mainWindow.show();
       if (mainWindow.isMinimized()) mainWindow.restore();
       mainWindow.focus();
     }
