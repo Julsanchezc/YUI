@@ -9,12 +9,18 @@
 Inspirado en el diseño y calidez de [Coucou](https://github.com/Louis-CFM/coucou) (Mochi) y la potencia agéntica de Jarvis. **YUI escucha tu voz (STT), piensa paso a paso (Reasoning con pool multi-key), ejecuta herramientas del sistema y te responde hablando de manera natural (TTS con expresiones faciales a 60 FPS).**
 
 ![Gemini 2.0](https://img.shields.io/badge/Gemini-2.0%20Flash-4285F4?logo=google&logoColor=white)
+![ElevenLabs](https://img.shields.io/badge/ElevenLabs-Primary%20TTS-black?logo=elevenlabs)
+![OpenCode](https://img.shields.io/badge/OpenCode-Connected-ff6b6b)
+![SwayFX](https://img.shields.io/badge/SwayFX-Wayland-00d4ff?logo=wayland&logoColor=white)
+![Waybar](https://img.shields.io/badge/Waybar-Integrated-00e676)
+![Arch Linux](https://img.shields.io/badge/Arch%20Linux-Native-1793D1?logo=archlinux&logoColor=white)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5.4-3178C6?logo=typescript&logoColor=white)
-![Vite](https://img.shields.io/badge/Vite-5.4-646CFF?logo=vite&logoColor=white)
 ![Canvas 2D](https://img.shields.io/badge/Canvas%202D-60%20FPS-00D8FF)
-![Python](https://img.shields.io/badge/Python-3.11%2B-blue?logo=python&logoColor=white)
-![Multi-Agent](https://img.shields.io/badge/Architecture-Multi--Agent-6f42c1)
 ![License: MIT](https://img.shields.io/badge/License-MIT-green)
+
+<br>
+
+<img src="public/sway-waybar-preview.svg" width="940" alt="YUI Notch Companion en Sway y Waybar">
 
 </div>
 
@@ -121,6 +127,41 @@ YUI se conecta nativamente con **[OpenCode](https://github.com/opencode-ai)** (`
 * **Streaming de Pensamiento en vivo:** El notch muestra las deducciones, pasos y herramientas que OpenCode va ejecutando en tiempo real.
 * **Sesiones activas:** YUI detecta y se vincula automáticamente con el servicio de fondo de OpenCode.
 * **Bridge asíncrono:** Servidor de puente en `server/opencode_bridge.py` con soporte para WebSockets y HTTP.
+
+---
+
+## 🐧 Integración con Sway & Waybar (SwayFX / Wayland)
+
+YUI está diseñada para integrarse como una isla dinámica flotante (*dynamic island*) sobre compositores Wayland como **Sway** y barras de estado como **Waybar**:
+
+### 1. Reglas de Ventana en Sway (`~/.config/sway/config`)
+La ventana de YUI se posiciona centrada en el borde superior, flotante y persistente en todos los espacios de trabajo:
+```sway
+# YUI Notch Companion (Isla flotante superior en todos los escritorios)
+for_window [app_id="(?i)yui.*"] floating enable, border none, sticky enable, shadows disable
+for_window [title="(?i)yui.*"] floating enable, border none, sticky enable, shadows disable
+for_window [app_id="electron" title="(?i)yui.*"] floating enable, border none, sticky enable, shadows disable
+
+# Atajos para desplegar o alternar a YUI
+bindsym $mod+Shift+y exec /home/niko/YUI/scripts/toggle-yui.sh
+bindsym $mod+grave exec /home/niko/YUI/scripts/toggle-yui.sh
+```
+
+### 2. Módulo Dinámico en Waybar (`~/.config/waybar/config.jsonc`)
+Añade la píldora reactiva de YUI en tu barra superior:
+```jsonc
+"custom/yui": {
+  "format": "{}",
+  "return-type": "json",
+  "interval": 2,
+  "exec": "~/.config/waybar/scripts/yui-status.sh",
+  "on-click": "/home/niko/YUI/scripts/toggle-yui.sh",
+  "on-click-right": "/home/niko/YUI/scripts/toggle-yui.sh",
+  "tooltip": true
+}
+```
+* **Estado en vivo:** Indica si YUI está activa (`󰚩 YUI`) o en reposo (`󱚝 YUI`).
+* **Interacción:** Clic izquierdo para desplegar u ocultar el notch. Clic derecho para activar reconocimiento de voz.
 
 ---
 
