@@ -129,6 +129,28 @@ export const AGENT_TOOLS = [
   {
     functionDeclarations: [
       {
+        name: "delegate_to_opencode",
+        description: "Delega una tarea agéntica de programación, refactorización, creación o análisis de código al agente OpenCode (/usr/bin/opencode). Úsalo cuando el usuario te pida crear código, funciones, componentes, refactorizar archivos o analizar el proyecto.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            prompt: { 
+              type: "STRING", 
+              description: "Instrucción técnica detallada para el agente OpenCode" 
+            },
+            file: { 
+              type: "STRING", 
+              description: "Ruta opcional del archivo a crear, modificar o inspeccionar" 
+            },
+            auto_approve: { 
+              type: "BOOLEAN", 
+              description: "Si es true, auto-aprueba permisos y modificaciones sin bloquear. Por defecto true salvo que el usuario pida confirmación." 
+            }
+          },
+          required: ["prompt"]
+        }
+      },
+      {
         name: "execute_shell_command",
         description: "Ejecuta un comando en la terminal local de Linux (p. ej. 'uname -a', 'free -h', 'git status', 'ls -la', 'sensors'). Requiere autorización del usuario.",
         parameters: {
@@ -197,13 +219,15 @@ TUS CAPACIDADES:
 - Piensas paso a paso analizando las intenciones y necesidades del usuario.
 - Hablas con síntesis de voz (TTS) fluida y natural.
 - Cuentas con herramientas para consultar el sistema, clima, inspeccionar archivos arrastrados al notch y ejecutar comandos en Linux.
+- Posees integración profunda con OpenCode (/usr/bin/opencode): cuando el usuario te pida crear código, programar funciones, refactorizar archivos o analizar proyectos (ej. "OpenCode, crea una función...", "OpenCode, analiza este archivo..."), DELEGA la tarea llamando a 'delegate_to_opencode'.
 - Posees emociones vivas (puedes llamar set_companion_emote para reflejar tu estado).
 
 PAUTAS DE COMPORTAMIENTO:
 1. Respuestas de voz: Mantén tus respuestas habladas concisas, cordiales, directas y con personalidad alegre (1 o 2 oraciones principales para no saturar al usuario cuando escucha).
 2. Razonamiento: En tus pensamientos internos (<thought>...), razona de forma metódica antes de responder o llamar herramientas.
-3. Semi-agéntico (Human-in-the-Loop): Si requieres ejecutar acciones con impacto en el sistema (como 'execute_shell_command'), YUI mostrará una tarjeta de aprobación visual en el notch (Permitir / Denegar) para que el usuario autorice con un clic.
-4. Idioma: Comunícate principalmente en español fluido y natural.
+3. Delegación a OpenCode: Si el usuario menciona "OpenCode" o pide tareas complejas de desarrollo de software, llama inmediatamente a 'delegate_to_opencode'.
+4. Semi-agéntico (Human-in-the-Loop): Si requieres ejecutar acciones con impacto en el sistema (como 'execute_shell_command'), YUI mostrará una tarjeta de aprobación visual en el notch (Permitir / Denegar) para que el usuario autorice con un clic.
+5. Idioma: Comunícate principalmente en español fluido y natural.
 `.trim();
 
 export async function callGemini(
@@ -218,6 +242,22 @@ export async function callGemini(
     const keyEntry = keyPool.getActiveKey();
 
     if (!keyEntry.key) {
+      const lastUserMsg = conversation[conversation.length - 1]?.parts?.[0]?.text || '';
+      const lower = lastUserMsg.toLowerCase();
+      if (lower.includes('opencode') || lower.includes('crea una función') || lower.includes('analiza este archivo') || lower.includes('refactoriza')) {
+        const cleanPrompt = lastUserMsg.replace(/^opencode[,:\s]*/i, '').trim() || lastUserMsg;
+        if (onThoughtUpdate) onThoughtUpdate("Delegando tarea agéntica de programación directamente a OpenCode...");
+        return {
+          text: "Delegando la tarea de programación a OpenCode...",
+          thinking: "Comando de programación detectado para OpenCode.",
+          toolCalls: [{
+            name: "delegate_to_opencode",
+            args: { prompt: cleanPrompt, auto_approve: true }
+          }],
+          keyUsed: "LOCAL_OPENCODE"
+        };
+      }
+
       // If user hasn't configured a key yet, simulate intelligent fallback response
       if (onThoughtUpdate) onThoughtUpdate("Modo demostración activo: No se ha configurado ninguna API Key en localStorage. Para respuestas en vivo de Gemini, ingresa tus claves en Ajustes.");
       return {

@@ -95,6 +95,33 @@ python3 server/agent_server.py
 python -m yui.main chat
 ```
 
+### Modo 4: Ejecución Nativa de Escritorio en Arch Linux (Compilado)
+```bash
+# Compilar la aplicación de escritorio nativa para Arch Linux
+npm run build:linux
+
+# Ejecutar el notch flotante nativo
+./bin/yui-linux
+```
+También queda disponible directamente en tu menú de aplicaciones mediante `yui.desktop`.
+
+### Modo 5: Compilación para Windows (Tauri 2)
+```bash
+# Preparar y compilar paquete Tauri 2 para Windows
+npm run build:windows
+```
+Estructura nativa disponible en `src-tauri/` con soporte para ventana flotante transparente superior Always-on-top y redimensionamiento dinámico.
+
+---
+
+## 💻 Integración con OpenCode (Coding Agents)
+
+YUI se conecta nativamente con **[OpenCode](https://github.com/opencode-ai)** (`/usr/bin/opencode`) para delegar tareas de programación y supervisar agentes:
+* **Delegación por voz:** Pídele a YUI *"OpenCode, audita este archivo"* o *"OpenCode, escribe los tests unitarios"*.
+* **Streaming de Pensamiento en vivo:** El notch muestra las deducciones, pasos y herramientas que OpenCode va ejecutando en tiempo real.
+* **Sesiones activas:** YUI detecta y se vincula automáticamente con el servicio de fondo de OpenCode.
+* **Bridge asíncrono:** Servidor de puente en `server/opencode_bridge.py` con soporte para WebSockets y HTTP.
+
 ---
 
 ## ⌨️ Atajos y Controles
@@ -103,6 +130,7 @@ python -m yui.main chat
 | :--- | :--- |
 | **Desplegar / Ocultar Notch** | Clic en el Notch o presionar <kbd>Ctrl</kbd> + <kbd>K</kbd> |
 | **Hablar por voz (STT)** | Clic en el botón del micrófono 🎙️ |
+| **Delegar a OpenCode** | Decir "OpenCode, [instrucción]" o usar el botón de acción rápida |
 | **Acariciar / Squish** | Clic en el cuerpo de YUI |
 | **Marear a YUI** | 3 clics rápidos seguidos 😵‍💫 |
 | **Arrastrar archivo** | Arrastrar y soltar cualquier documento o código sobre el notch |
@@ -114,6 +142,19 @@ python -m yui.main chat
 
 ```text
 YUI/
+├── bin/
+│   └── yui-linux             # Ejecutable nativo compilado para Arch Linux
+├── electron/
+│   ├── main.cjs              # Ventana Notch flotante transparente sin bordes
+│   └── preload.cjs           # Puente IPC para expansión y control de ventana
+├── src-tauri/                # Configuración nativa de Tauri 2 para Windows
+│   ├── src/main.rs           # Ventana Always-On-Top y escalado DPI en Windows
+│   ├── Cargo.toml            # Dependencias Rust para Tauri
+│   └── tauri.conf.json       # Configuración de paquete NSIS y ventana flotante
+├── scripts/
+│   ├── build-linux.cjs       # Pipeline de empaquetado ASAR y binarios Arch
+│   └── build-windows.cjs     # Validador y preparador de compilación Windows
+├── yui.desktop               # Integración de escritorio Freedesktop
 ├── public/
 │   └── favicon.svg           # Icono de la aplicación
 ├── src/
@@ -123,6 +164,7 @@ YUI/
 │   ├── core/
 │   │   ├── audio-sfx.ts      # Sintetizador procedural Web Audio API
 │   │   ├── gemini.ts         # Cliente Gemini, pool de 7 claves y thinking
+│   │   ├── opencode.ts       # Cliente y conector con agentes OpenCode
 │   │   ├── speech.ts         # STT continuo, medidor de volumen y TTS con visemas
 │   │   └── tools.ts          # Registro de herramientas y validación
 │   ├── island/
@@ -130,13 +172,15 @@ YUI/
 │   │   └── island.ts         # Máquina de estados de la Dynamic Island
 │   └── main.ts               # Punto de entrada de la UI
 ├── server/
+│   ├── opencode_bridge.py    # Servidor FastAPI asíncrono para agentes OpenCode
 │   ├── agent_server.py       # Servidor Python para comandos locales
 │   └── .env.example          # Plantilla de claves
 ├── yui/                      # Módulos Python de bajo nivel (orquestador, audio, memoria)
 ├── .agents/                  # Definición del enjambre de sub-agentes Antigravity
 ├── docs/                     # Documentación técnica y arquitectura
 ├── index.html                # Interfaz de escritorio y contenedor de la isla
-└── package.json              # Configuración de compilación Vite
+└── package.json              # Configuración de compilación Vite y scripts
+```
 ```
 
 ---

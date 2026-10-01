@@ -2,7 +2,28 @@
 import { DynamicIsland } from './island/island';
 import { Sound } from './core/audio-sfx';
 
+declare global {
+  interface Window {
+    electronAPI?: {
+      isDesktop: boolean;
+      platform: string;
+      setMode: (mode: string) => void;
+      resize: (width: number, height: number) => void;
+      close: () => void;
+      minimize: () => void;
+    };
+    __TAURI__?: any;
+    yuiTriggerQuick?: (q: string) => void;
+  }
+}
+
 document.addEventListener('DOMContentLoaded', () => {
+  const isDesktop = !!(window.electronAPI || window.__TAURI__ || window.location.search.includes('desktop'));
+  if (isDesktop) {
+    document.documentElement.classList.add('desktop-mode');
+    document.body.classList.add('desktop-mode');
+  }
+
   const appRoot = document.getElementById('app');
   if (!appRoot) return;
 

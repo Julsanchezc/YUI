@@ -29,6 +29,20 @@
     ::-webkit-scrollbar-thumb:hover {
       background: rgba(56, 189, 248, 0.6);
     }
+    /* Desktop Notch Mode Styles */
+    html.desktop-mode, body.desktop-mode {
+      background: transparent !important;
+      background-color: transparent !important;
+    }
+    .desktop-mode #desktopSimulator {
+      display: none !important;
+    }
+    .desktop-mode #islandContainer {
+      position: absolute !important;
+      width: 100% !important;
+      left: 0 !important;
+      right: 0 !important;
+    }
   </style>
 </head>
 <body class="h-full bg-slate-950 text-slate-100 overflow-hidden font-sans antialiased selection:bg-cyan-500 selection:text-black">
@@ -37,7 +51,7 @@
   <div id="app"></div>
 
   <!-- Background Desktop Environment Simulator -->
-  <main class="h-full w-full flex flex-col items-center justify-center p-6 relative pointer-events-auto">
+  <main id="desktopSimulator" class="h-full w-full flex flex-col items-center justify-center p-6 relative pointer-events-auto">
     
     <!-- Subtle Ambient Glow -->
     <div class="absolute inset-0 bg-[radial-gradient(circle_at_top,_var(--tw-gradient-stops))] from-cyan-950/20 via-slate-950 to-slate-950 pointer-events-none"></div>

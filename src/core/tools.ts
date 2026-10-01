@@ -1,4 +1,4 @@
-// Agent Tools Execution Engine
+import { openCodeClient, OpenCodeTaskResult } from './opencode';
 
 export interface ToolExecutionResult {
   toolName: string;
@@ -14,6 +14,21 @@ export interface ToolExecutionResult {
 export class ToolRegistry {
   private lastDroppedFile: { name: string; size: number; type: string; content?: string } | null = null;
   public onEmoteRequested?: (emote: string) => void;
+  public onOpenCodeProgress?: (status: string, detail?: string) => void;
+  public onOpenCodeThought?: (thought: string) => void;
+
+  constructor() {
+    openCodeClient.onProgress = (status, detail) => {
+      if (this.onOpenCodeProgress) {
+        this.onOpenCodeProgress(status, detail);
+      }
+    };
+    openCodeClient.onThought = (thought) => {
+      if (this.onOpenCodeThought) {
+        this.onOpenCodeThought(thought);
+      }
+    };
+  }
 
   public setDroppedFile(file: File, textPreview?: string) {
     this.lastDroppedFile = {
@@ -30,6 +45,54 @@ export class ToolRegistry {
     approved: boolean = false
   ): Promise<ToolExecutionResult> {
     switch (name) {
+      case 'delegate_to_opencode': {
+        const prompt = args.prompt || '';
+        const file = args.file || (this.lastDroppedFile ? this.lastDroppedFile.name : undefined);
+        const autoApprove = args.auto_approve !== false;
+
+        if (!prompt) {
+          return {
+            toolName: name,
+            result: { error: "Se requiere un prompt para OpenCode." }
+          };
+        }
+
+        // Semi-Agentic: If auto_approve is false and not yet approved by user, show HITL approval card
+        if (!autoApprove && !approved) {
+          return {
+            toolName: name,
+            result: null,
+            needsApproval: true,
+            approvalPayload: {
+              actionTitle: "Delegar tarea a OpenCode (/usr/bin/opencode)",
+              command: `opencode run "${prompt}"${file ? ` --file ${file}` : ''}`,
+              reason: "Ejecución de tarea agéntica de programación en el sistema"
+            }
+          };
+        }
+
+        try {
+          const res = await openCodeClient.runTask({
+            prompt,
+            file,
+            autoApprove: true,
+            sessionId: openCodeClient.getCurrentSession() || undefined
+          });
+          return {
+            toolName: name,
+            result: res
+          };
+        } catch (err: any) {
+          return {
+            toolName: name,
+            result: {
+              success: false,
+              error: `Error al comunicar con OpenCode: ${err.message}`
+            }
+          };
+        }
+      }
+
       case 'get_system_status': {
         const perf = typeof window !== 'undefined' && (window.performance as any).memory;
         const ramUsed = perf ? Math.round(perf.usedJSHeapSize / (1024 * 1024)) : 142;

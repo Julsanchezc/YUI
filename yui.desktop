@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=YUI
+Comment=Notch Companion Agent powered by Google Gemini
+Exec=/home/niko/YUI/bin/yui-linux %U
+Icon=/home/niko/YUI/public/favicon.svg
+Terminal=false
+Type=Application
+Categories=Utility;X-Assistant;
+StartupWMClass=yui-companion

@@ -120,6 +120,10 @@ export class DynamicIsland {
               <button id="toggleExpandBtn" class="text-slate-400 hover:text-slate-200 p-1 rounded transition">
                 <svg id="expandIcon" class="w-4 h-4 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
               </button>
+
+              <button id="closeDesktopBtn" title="Cerrar YUI" class="text-slate-500 hover:text-rose-400 p-1 rounded transition hidden">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+              </button>
             </div>
 
           </div>
@@ -160,7 +164,7 @@ export class DynamicIsland {
                 <span>Acciones rápidas:</span>
                 <button onclick="window.yuiTriggerQuick('¿Cuál es el estado del sistema?')" class="hover:text-cyan-300 underline">📊 Sistema</button>
                 <button onclick="window.yuiTriggerQuick('¿Qué clima hace hoy?')" class="hover:text-cyan-300 underline">🌤️ Clima</button>
-                <button onclick="window.yuiTriggerQuick('Cuéntame algo curioso')" class="hover:text-cyan-300 underline">💡 Curiosidad</button>
+                <button onclick="window.yuiTriggerQuick('OpenCode, crea una función en TypeScript para formatear fechas')" class="hover:text-purple-300 text-purple-400 font-bold underline">⚡ OpenCode</button>
               </div>
 
               <div class="flex items-center gap-3">
@@ -213,6 +217,24 @@ export class DynamicIsland {
       toggleExpand();
     });
 
+    // Close desktop button
+    const closeDesktopBtn = this.root.querySelector('#closeDesktopBtn') as HTMLElement;
+    if (closeDesktopBtn) {
+      if (window.electronAPI || (window as any).__TAURI__) {
+        closeDesktopBtn.classList.remove('hidden');
+      }
+      closeDesktopBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (window.electronAPI?.close) {
+          window.electronAPI.close();
+        } else if ((window as any).__TAURI__?.process?.exit) {
+          (window as any).__TAURI__.process.exit(0);
+        } else {
+          window.close();
+        }
+      });
+    }
+
     // Key pool badge click -> Rotate key manually
     this.keyBadge.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -257,6 +279,32 @@ export class DynamicIsland {
     // Tool registry emote callback
     toolRegistry.onEmoteRequested = (emote) => {
       this.companion.triggerEmote(emote);
+    };
+
+    // OpenCode Live State & Thinking Trace in Dynamic Island Notch
+    toolRegistry.onOpenCodeProgress = (status: string, detail?: string) => {
+      this.statusText.textContent = status;
+      if (this.pillBadge) {
+        this.pillBadge.className = 'w-2 h-2 rounded-full bg-violet-400 animate-pulse';
+      }
+      this.companion.setState('thinking');
+      if (detail) {
+        this.thinkingContainer.classList.remove('hidden');
+        const stepEl = document.createElement('div');
+        stepEl.className = 'text-cyan-300 text-[11px] font-mono py-0.5 border-l-2 border-cyan-400 pl-2 my-0.5';
+        stepEl.textContent = `⚡ [${status}] ${detail}`;
+        this.thinkingContent.appendChild(stepEl);
+        this.thinkingContent.scrollTop = this.thinkingContent.scrollHeight;
+      }
+    };
+
+    toolRegistry.onOpenCodeThought = (thought: string) => {
+      this.thinkingContainer.classList.remove('hidden');
+      const thoughtEl = document.createElement('div');
+      thoughtEl.className = 'text-purple-200 text-[11px] font-mono py-0.5 pl-2 border-l-2 border-purple-500 my-0.5 leading-relaxed';
+      thoughtEl.textContent = thought;
+      this.thinkingContent.appendChild(thoughtEl);
+      this.thinkingContent.scrollTop = this.thinkingContent.scrollHeight;
     };
   }
 
@@ -390,16 +438,26 @@ export class DynamicIsland {
 
   public setMode(mode: IslandMode) {
     this.mode = mode;
-    const expandIcon = this.root.querySelector('#expandIcon')!;
+    const expandIcon = this.root.querySelector('#expandIcon');
 
     if (mode === 'expanded') {
       this.expandedPanel.classList.remove('hidden');
-      expandIcon.classList.add('rotate-180');
+      if (expandIcon) expandIcon.classList.add('rotate-180');
       Sound.play('open');
+      if (window.electronAPI?.setMode) {
+        window.electronAPI.setMode('expanded');
+      } else if ((window as any).__TAURI__?.core?.invoke) {
+        (window as any).__TAURI__.core.invoke('resize_notch', { expanded: true });
+      }
     } else {
       this.expandedPanel.classList.add('hidden');
-      expandIcon.classList.remove('rotate-180');
+      if (expandIcon) expandIcon.classList.remove('rotate-180');
       Sound.play('close');
+      if (window.electronAPI?.setMode) {
+        window.electronAPI.setMode('pill');
+      } else if ((window as any).__TAURI__?.core?.invoke) {
+        (window as any).__TAURI__.core.invoke('resize_notch', { expanded: false });
+      }
     }
   }
 
@@ -502,15 +560,59 @@ export class DynamicIsland {
 
   private finalizeTurn(agentText: string, toolResult?: any) {
     let displayText = agentText;
+    let spokenSummary = agentText;
+
+    // Reset notch pill badge to standard cyan
+    if (this.pillBadge) {
+      this.pillBadge.className = 'w-2 h-2 rounded-full bg-cyan-400';
+    }
+
     if (toolResult) {
-      displayText += `\n<pre class="mt-1 p-1.5 bg-black/40 rounded text-[10px] text-emerald-300 font-mono overflow-x-auto">${JSON.stringify(toolResult, null, 2)}</pre>`;
+      // Check if toolResult is from OpenCode
+      if (toolResult.toolsUsed !== undefined || toolResult.sessionId !== undefined) {
+        this.statusText.textContent = "OpenCode: Completado ✓";
+        this.companion.triggerEmote('proud', 2.0);
+
+        const toolsCount = toolResult.toolsUsed ? toolResult.toolsUsed.length : 0;
+        const sessionId = toolResult.sessionId ? `ID: ${toolResult.sessionId.slice(0, 14)}...` : '';
+        const opencodeText = toolResult.text || '';
+
+        let toolsDetailHtml = '';
+        if (toolResult.toolsUsed && toolResult.toolsUsed.length > 0) {
+          const listItems = toolResult.toolsUsed.map((t: any) => {
+            const inputSummary = t.input?.path || (typeof t.input === 'object' ? JSON.stringify(t.input) : t.input) || '';
+            return `<li class="font-mono text-[10px] text-emerald-300">⚙ <strong>${t.tool || 'tool'}</strong> ${inputSummary ? `<span class="text-slate-400">(${inputSummary})</span>` : ''}</li>`;
+          }).join('');
+          toolsDetailHtml = `<ul class="my-1 pl-2 border-l border-emerald-500/40 space-y-0.5">${listItems}</ul>`;
+        }
+
+        displayText = `
+          <div class="space-y-1.5">
+            <div class="flex items-center gap-2 mb-1 flex-wrap">
+              <span class="bg-violet-900/80 border border-violet-500/50 text-violet-200 text-[10px] font-mono px-2 py-0.5 rounded-full font-bold shadow-sm">
+                ⚡ OpenCode
+              </span>
+              ${sessionId ? `<span class="text-[9px] font-mono text-slate-400 bg-slate-900/80 px-1.5 py-0.5 rounded">${sessionId}</span>` : ''}
+              ${toolsCount > 0 ? `<span class="text-[9px] font-mono text-emerald-300 bg-emerald-950/80 border border-emerald-800/80 px-1.5 py-0.5 rounded">${toolsCount} herramienta${toolsCount > 1 ? 's' : ''}</span>` : ''}
+            </div>
+            ${toolsDetailHtml}
+            <div class="leading-relaxed text-slate-100 whitespace-pre-wrap">${opencodeText ? opencodeText : agentText}</div>
+          </div>
+        `;
+
+        // YUI synthesizes via voice (TTS)
+        const summaryText = opencodeText ? opencodeText.replace(/```[\s\S]*?```/g, 'código generado.').slice(0, 140) : 'La tarea de OpenCode se ha completado.';
+        spokenSummary = `OpenCode ha terminado la tarea. ${summaryText}`;
+      } else {
+        displayText += `\n<pre class="mt-1 p-1.5 bg-black/40 rounded text-[10px] text-emerald-300 font-mono overflow-x-auto">${JSON.stringify(toolResult, null, 2)}</pre>`;
+      }
     }
 
     this.addMessage('model', displayText);
     this.conversation.push({ role: 'model', parts: [{ text: agentText }] });
 
     // Speak using TTS
-    speechEngine.speak(agentText, () => {
+    speechEngine.speak(spokenSummary, () => {
       this.companion.setState('idle');
       this.statusText.textContent = "Listo";
     });

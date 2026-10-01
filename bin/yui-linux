@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+set -e
+
+# Base directory
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+# Target ASAR package
+ASAR_PATH="$PROJECT_ROOT/dist/yui-linux/app.asar"
+if [ ! -f "$ASAR_PATH" ]; then
+  ASAR_PATH="$SCRIPT_DIR/app.asar"
+fi
+
+# Detect Electron on Arch Linux
+if command -v electron42 >/dev/null 2>&1; then
+  ELECTRON_BIN="electron42"
+elif command -v electron43 >/dev/null 2>&1; then
+  ELECTRON_BIN="electron43"
+elif command -v electron >/dev/null 2>&1; then
+  ELECTRON_BIN="electron"
+else
+  echo "Error: No se encontró electron42 ni electron en el sistema Arch Linux." >&2
+  echo "Instálalo con: sudo pacman -S electron42" >&2
+  exit 1
+fi
+
+# Linux Wayland / X11 flags for smooth transparency and top-edge positioning
+FLAGS=()
+if [ -n "$WAYLAND_DISPLAY" ]; then
+  FLAGS+=("--ozone-platform-hint=auto" "--enable-features=UseOzonePlatform,WaylandWindowDecorations")
+fi
+
+exec "$ELECTRON_BIN" "${FLAGS[@]}" "$ASAR_PATH" "$@"
