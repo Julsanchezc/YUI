@@ -22,8 +22,36 @@ export class SpeechEngine {
   public onSpeakingChange?: (speaking: boolean) => void;
   public onSpeakingViseme?: (amplitude: number) => void;
 
+  // ElevenLabs Primary Voice Engine Config
+  public elevenLabsApiKey: string = '';
+  public elevenLabsVoiceId: string = 'IqGIz3dgA7lYSRe3s8tS';
+  private currentAudioSource: AudioBufferSourceNode | null = null;
+  private ttsAudioCtx: AudioContext | null = null;
+
   constructor() {
     this.initRecognition();
+    this.loadElevenLabsConfig();
+  }
+
+  public loadElevenLabsConfig() {
+    if (typeof window !== 'undefined') {
+      const storedKey = localStorage.getItem('yui_elevenlabs_key');
+      const storedVoice = localStorage.getItem('yui_elevenlabs_voice_id');
+      const envKey = (import.meta as any).env?.VITE_ELEVENLABS_API_KEY;
+      const envVoice = (import.meta as any).env?.VITE_ELEVENLABS_VOICE_ID;
+
+      this.elevenLabsApiKey = storedKey || envKey || '';
+      this.elevenLabsVoiceId = storedVoice || envVoice || 'IqGIz3dgA7lYSRe3s8tS';
+    }
+  }
+
+  public setElevenLabsConfig(key: string, voiceId?: string) {
+    this.elevenLabsApiKey = key;
+    if (voiceId) this.elevenLabsVoiceId = voiceId;
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('yui_elevenlabs_key', key);
+      if (voiceId) localStorage.setItem('yui_elevenlabs_voice_id', voiceId);
+    }
   }
 
   private initRecognition() {
@@ -154,14 +182,13 @@ export class SpeechEngine {
 
   // ── Text-to-Speech (TTS) ──────────────────────────────────────────────────
 
-  public speak(text: string, onDone?: () => void) {
-    if (!this.ttsEnabled || typeof window === 'undefined' || !('speechSynthesis' in window)) {
+  public async speak(text: string, onDone?: () => void) {
+    if (!this.ttsEnabled || typeof window === 'undefined') {
       if (onDone) onDone();
       return;
     }
 
-    // Cancel any previous utterance
-    window.speechSynthesis.cancel();
+    this.stopSpeaking();
 
     // Clean markdown symbols or asterisks before speaking
     const cleanText = text
@@ -176,12 +203,102 @@ export class SpeechEngine {
       return;
     }
 
+    // 1. Intentar primero con ElevenLabs como motor primario
+    if (this.elevenLabsApiKey && this.elevenLabsVoiceId) {
+      const ok = await this.speakElevenLabs(cleanText, onDone);
+      if (ok) return;
+    }
+
+    // 2. Fallback a Web Speech API del navegador
+    this.speakBrowser(cleanText, onDone);
+  }
+
+  private async speakElevenLabs(text: string, onDone?: () => void): Promise<boolean> {
+    try {
+      if (this.onSpeakingChange) this.onSpeakingChange(true);
+
+      const endpoint = `https://api.elevenlabs.io/v1/text-to-speech/${this.elevenLabsVoiceId}`;
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'xi-api-key': this.elevenLabsApiKey,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          text: text,
+          model_id: 'eleven_multilingual_v2',
+          voice_settings: {
+            stability: 0.5,
+            similarity_boost: 0.8
+          }
+        })
+      });
+
+      if (!response.ok) {
+        const errJson = await response.json().catch(() => ({}));
+        console.warn('[ElevenLabs] TTS no disponible (fallback a voz del navegador):', errJson?.detail?.message || response.statusText);
+        return false;
+      }
+
+      const audioData = await response.arrayBuffer();
+      const AudioCtor = window.AudioContext || (window as any).webkitAudioContext;
+      this.ttsAudioCtx = new AudioCtor();
+      const audioBuffer = await this.ttsAudioCtx.decodeAudioData(audioData);
+
+      const source = this.ttsAudioCtx.createBufferSource();
+      source.buffer = audioBuffer;
+
+      const analyser = this.ttsAudioCtx.createAnalyser();
+      analyser.fftSize = 64;
+      source.connect(analyser);
+      analyser.connect(this.ttsAudioCtx.destination);
+
+      this.currentAudioSource = source;
+
+      // Análisis FFT en tiempo real para visemas faciales de YUI
+      const dataArray = new Uint8Array(analyser.frequencyBinCount);
+      let visemeFrame: number | null = null;
+
+      const analyzeVisemes = () => {
+        if (!this.currentAudioSource || !analyser) return;
+        analyser.getByteFrequencyData(dataArray);
+        let sum = 0;
+        for (let i = 0; i < dataArray.length; i++) sum += dataArray[i];
+        const avg = sum / dataArray.length;
+        const normalized = Math.min(1, avg / 110);
+        if (this.onSpeakingViseme) this.onSpeakingViseme(normalized);
+        visemeFrame = requestAnimationFrame(analyzeVisemes);
+      };
+      visemeFrame = requestAnimationFrame(analyzeVisemes);
+
+      source.onended = () => {
+        if (visemeFrame) cancelAnimationFrame(visemeFrame);
+        if (this.onSpeakingChange) this.onSpeakingChange(false);
+        if (this.onSpeakingViseme) this.onSpeakingViseme(0);
+        this.currentAudioSource = null;
+        if (onDone) onDone();
+      };
+
+      source.start(0);
+      return true;
+
+    } catch (e) {
+      console.warn('[ElevenLabs] Error de reproducción TTS, usando fallback:', e);
+      return false;
+    }
+  }
+
+  private speakBrowser(cleanText: string, onDone?: () => void) {
+    if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
+      if (onDone) onDone();
+      return;
+    }
+
     const utterance = new SpeechSynthesisUtterance(cleanText);
     utterance.lang = 'es-ES';
     utterance.rate = this.speechRate;
     utterance.pitch = this.speechPitch;
 
-    // Pick best available Spanish voice
     const voices = window.speechSynthesis.getVoices();
     const esVoice = voices.find(v => v.lang.startsWith('es') && (v.name.includes('Natural') || v.name.includes('Google') || v.name.includes('Sabina') || v.name.includes('Mónica')));
     if (esVoice) utterance.voice = esVoice;
@@ -190,7 +307,6 @@ export class SpeechEngine {
 
     utterance.onstart = () => {
       if (this.onSpeakingChange) this.onSpeakingChange(true);
-      // Simulate viseme pulses for facial animation
       visemeInterval = window.setInterval(() => {
         if (this.onSpeakingViseme) {
           const amp = 0.2 + Math.random() * 0.8;
@@ -216,11 +332,19 @@ export class SpeechEngine {
   }
 
   public stopSpeaking() {
+    if (this.currentAudioSource) {
+      try { this.currentAudioSource.stop(); } catch (e) {}
+      this.currentAudioSource = null;
+    }
+    if (this.ttsAudioCtx && this.ttsAudioCtx.state !== 'closed') {
+      try { this.ttsAudioCtx.close(); } catch (e) {}
+      this.ttsAudioCtx = null;
+    }
     if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
       window.speechSynthesis.cancel();
-      if (this.onSpeakingChange) this.onSpeakingChange(false);
-      if (this.onSpeakingViseme) this.onSpeakingViseme(0);
     }
+    if (this.onSpeakingChange) this.onSpeakingChange(false);
+    if (this.onSpeakingViseme) this.onSpeakingViseme(0);
   }
 }
 
