@@ -1,4 +1,6 @@
 // Speech-to-Text (STT) and Text-to-Speech (TTS) Engine with Voice Activity Metering
+// Supports ElevenLabs Primary Voice Engine (with auto-fallback to standard voices)
+// Supports Multimodal Gemini Audio Recording STT for Linux Wayland & Electron
 
 export interface SpeechCallbacks {
   onSpeechStart?: () => void;
@@ -9,12 +11,13 @@ export interface SpeechCallbacks {
 }
 
 export class SpeechEngine {
-  private recognition: any = null;
   private isListening: boolean = false;
   private audioCtx: AudioContext | null = null;
   private analyser: AnalyserNode | null = null;
   private micStream: MediaStream | null = null;
   private levelAnimFrame: number | null = null;
+  private mediaRecorder: MediaRecorder | null = null;
+  private audioChunks: Blob[] = [];
 
   public ttsEnabled: boolean = true;
   public speechRate: number = 1.05;
@@ -29,7 +32,6 @@ export class SpeechEngine {
   private ttsAudioCtx: AudioContext | null = null;
 
   constructor() {
-    this.initRecognition();
     this.loadElevenLabsConfig();
   }
 
@@ -54,20 +56,11 @@ export class SpeechEngine {
     }
   }
 
-  private initRecognition() {
-    if (typeof window === 'undefined') return;
-    const SpeechRec = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (SpeechRec) {
-      this.recognition = new SpeechRec();
-      this.recognition.continuous = true;
-      this.recognition.interimResults = true;
-      this.recognition.lang = 'es-ES';
-    }
+  public isSupported(): boolean {
+    return typeof navigator !== 'undefined' && !!navigator.mediaDevices?.getUserMedia;
   }
 
-  public isSupported(): boolean {
-    return !!this.recognition;
-  }
+  // ── Speech-to-Text (STT) via MediaRecorder + Gemini 3.5 Multimodal Audio ──
 
   public async startListening(callbacks: SpeechCallbacks): Promise<boolean> {
     if (this.isListening) return true;
@@ -75,83 +68,99 @@ export class SpeechEngine {
     // Barge-in: Stop any speaking voice immediately when user initiates listening
     this.stopSpeaking();
 
-    // Start Audio Level Analyser for reactive visuals
     try {
-      if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-        this.micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        const AudioCtor = window.AudioContext || (window as any).webkitAudioContext;
-        this.audioCtx = new AudioCtor();
-        const source = this.audioCtx.createMediaStreamSource(this.micStream);
-        this.analyser = this.audioCtx.createAnalyser();
-        this.analyser.fftSize = 64;
-        source.connect(this.analyser);
-
-        const dataArray = new Uint8Array(this.analyser.frequencyBinCount);
-        const checkLevel = () => {
-          if (!this.isListening || !this.analyser) return;
-          this.analyser.getByteFrequencyData(dataArray);
-          let sum = 0;
-          for (let i = 0; i < dataArray.length; i++) {
-            sum += dataArray[i];
-          }
-          const avg = sum / dataArray.length;
-          const normalized = Math.min(1, avg / 128);
-          if (callbacks.onAudioLevel) {
-            callbacks.onAudioLevel(normalized);
-          }
-          this.levelAnimFrame = requestAnimationFrame(checkLevel);
-        };
-        this.levelAnimFrame = requestAnimationFrame(checkLevel);
+      if (!navigator.mediaDevices?.getUserMedia) {
+        throw new Error("El navegador no soporta captura de micrófono.");
       }
-    } catch (e) {
-      console.warn("Microphone analyser not accessible:", e);
-    }
 
-    if (!this.recognition) {
-      this.initRecognition();
-      if (!this.recognition) return false;
-    }
+      this.micStream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          channelCount: 1,
+          sampleRate: 16000,
+          echoCancellation: true,
+          noiseSuppression: true
+        }
+      });
 
-    this.recognition.onstart = () => {
+      const AudioCtor = window.AudioContext || (window as any).webkitAudioContext;
+      this.audioCtx = new AudioCtor();
+      const source = this.audioCtx.createMediaStreamSource(this.micStream);
+      this.analyser = this.audioCtx.createAnalyser();
+      this.analyser.fftSize = 64;
+      source.connect(this.analyser);
+
+      // Realtime Audio Level Analyser for Wave Visualizer
+      const dataArray = new Uint8Array(this.analyser.frequencyBinCount);
+      const checkLevel = () => {
+        if (!this.isListening || !this.analyser) return;
+        this.analyser.getByteFrequencyData(dataArray);
+        let sum = 0;
+        for (let i = 0; i < dataArray.length; i++) {
+          sum += dataArray[i];
+        }
+        const avg = sum / dataArray.length;
+        const normalized = Math.min(1, avg / 128);
+        if (callbacks.onAudioLevel) {
+          callbacks.onAudioLevel(normalized);
+        }
+        this.levelAnimFrame = requestAnimationFrame(checkLevel);
+      };
+      this.levelAnimFrame = requestAnimationFrame(checkLevel);
+
+      // Start MediaRecorder
+      this.audioChunks = [];
+      const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+        ? 'audio/webm;codecs=opus'
+        : MediaRecorder.isTypeSupported('audio/ogg;codecs=opus')
+          ? 'audio/ogg;codecs=opus'
+          : 'audio/webm';
+
+      this.mediaRecorder = new MediaRecorder(this.micStream, { mimeType });
+      this.mediaRecorder.ondataavailable = (e) => {
+        if (e.data && e.data.size > 0) {
+          this.audioChunks.push(e.data);
+        }
+      };
+
+      this.mediaRecorder.onstop = async () => {
+        this.isListening = false;
+        this.cleanAudioAnalyser();
+        if (callbacks.onSpeechEnd) callbacks.onSpeechEnd();
+
+        if (this.audioChunks.length === 0) return;
+        const audioBlob = new Blob(this.audioChunks, { type: mimeType });
+        if (audioBlob.size < 600) return; // Audio too short or empty
+
+        try {
+          if (callbacks.onSpeechResult) {
+            callbacks.onSpeechResult("Escuchando y transcribiendo...", false);
+          }
+          const transcript = await this.transcribeWithGemini(audioBlob);
+          if (transcript && transcript.trim()) {
+            if (callbacks.onSpeechResult) {
+              callbacks.onSpeechResult(transcript.trim(), true);
+            }
+          } else {
+            if (callbacks.onSpeechResult) {
+              callbacks.onSpeechResult("", false);
+            }
+          }
+        } catch (err: any) {
+          console.warn("[STT] Error transcribiendo audio con Gemini:", err);
+          if (callbacks.onError) callbacks.onError(err);
+        }
+      };
+
+      this.mediaRecorder.start(200);
       this.isListening = true;
       if (callbacks.onSpeechStart) callbacks.onSpeechStart();
-    };
+      return true;
 
-    this.recognition.onresult = (event: any) => {
-      let interimTranscript = '';
-      let finalTranscript = '';
-
-      for (let i = event.resultIndex; i < event.results.length; ++i) {
-        if (event.results[i].isFinal) {
-          finalTranscript += event.results[i][0].transcript;
-        } else {
-          interimTranscript += event.results[i][0].transcript;
-        }
-      }
-
-      if (finalTranscript && callbacks.onSpeechResult) {
-        callbacks.onSpeechResult(finalTranscript.trim(), true);
-      } else if (interimTranscript && callbacks.onSpeechResult) {
-        callbacks.onSpeechResult(interimTranscript.trim(), false);
-      }
-    };
-
-    this.recognition.onerror = (event: any) => {
-      console.warn("Speech recognition error:", event.error);
-      if (callbacks.onError) callbacks.onError(event);
-    };
-
-    this.recognition.onend = () => {
+    } catch (e: any) {
+      console.error("[STT] Error al acceder al micrófono:", e);
       this.isListening = false;
       this.cleanAudioAnalyser();
-      if (callbacks.onSpeechEnd) callbacks.onSpeechEnd();
-    };
-
-    try {
-      this.recognition.start();
-      return true;
-    } catch (e) {
-      console.error("Failed to start speech recognition:", e);
+      if (callbacks.onError) callbacks.onError(e);
       return false;
     }
   }
@@ -159,10 +168,13 @@ export class SpeechEngine {
   public stopListening() {
     if (!this.isListening) return;
     this.isListening = false;
-    try {
-      if (this.recognition) this.recognition.stop();
-    } catch (e) {}
-    this.cleanAudioAnalyser();
+    if (this.mediaRecorder && this.mediaRecorder.state !== 'inactive') {
+      try {
+        this.mediaRecorder.stop();
+      } catch (e) {}
+    } else {
+      this.cleanAudioAnalyser();
+    }
   }
 
   private cleanAudioAnalyser() {
@@ -180,6 +192,46 @@ export class SpeechEngine {
     }
   }
 
+  private async transcribeWithGemini(blob: Blob): Promise<string> {
+    const arrayBuffer = await blob.arrayBuffer();
+    const bytes = new Uint8Array(arrayBuffer);
+    let binary = '';
+    const len = bytes.byteLength;
+    for (let i = 0; i < len; i++) {
+      binary += String.fromCharCode(bytes[i]);
+    }
+    const base64Audio = btoa(binary);
+
+    // Get active key from keyPool
+    const { keyPool } = await import('./gemini');
+    const key = keyPool.getActiveKey();
+    if (!key.key) return '';
+
+    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent?key=${key.key}`;
+    const res = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{
+          parts: [
+            { inlineData: { mimeType: blob.type.split(';')[0] || "audio/webm", data: base64Audio } },
+            { text: "Transcribe exactamente en español lo que dice el usuario en este audio. Devuelve ÚNICAMENTE la transcripción exacta sin comentarios adicionales, sin prefijos y sin comillas." }
+          ]
+        }]
+      })
+    });
+
+    if (!res.ok) {
+      const errText = await res.text();
+      console.warn("[STT] Gemini transcription failed:", errText);
+      return '';
+    }
+
+    const data = await res.json();
+    const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+    return rawText.replace(/^["']|["']$/g, '').trim();
+  }
+
   // ── Text-to-Speech (TTS) ──────────────────────────────────────────────────
 
   public async speak(text: string, onDone?: () => void) {
@@ -195,6 +247,7 @@ export class SpeechEngine {
       .replace(/\*\*([^*]+)\*\*/g, '$1')
       .replace(/\*([^*]+)\*/g, '$1')
       .replace(/`([^`]+)`/g, '$1')
+      .replace(/<[^>]+>/g, '') // remove HTML tags
       .replace(/#+\s+/g, '')
       .trim();
 
@@ -203,8 +256,8 @@ export class SpeechEngine {
       return;
     }
 
-    // 1. Intentar primero con ElevenLabs como motor primario
-    if (this.elevenLabsApiKey && this.elevenLabsVoiceId) {
+    // 1. Intentar primero con ElevenLabs como motor primario (con voz configurada o fallback estándar)
+    if (this.elevenLabsApiKey) {
       const ok = await this.speakElevenLabs(cleanText, onDone);
       if (ok) return;
     }
@@ -213,11 +266,12 @@ export class SpeechEngine {
     this.speakBrowser(cleanText, onDone);
   }
 
-  private async speakElevenLabs(text: string, onDone?: () => void): Promise<boolean> {
+  private async speakElevenLabs(text: string, onDone?: () => void, voiceOverride?: string): Promise<boolean> {
     try {
       if (this.onSpeakingChange) this.onSpeakingChange(true);
 
-      const endpoint = `https://api.elevenlabs.io/v1/text-to-speech/${this.elevenLabsVoiceId}`;
+      const targetVoice = voiceOverride || this.elevenLabsVoiceId || 'EXAVITQu4vr4xnSDxMaL';
+      const endpoint = `https://api.elevenlabs.io/v1/text-to-speech/${targetVoice}`;
       const response = await fetch(endpoint, {
         method: 'POST',
         headers: {
@@ -236,7 +290,14 @@ export class SpeechEngine {
 
       if (!response.ok) {
         const errJson = await response.json().catch(() => ({}));
-        console.warn('[ElevenLabs] TTS no disponible (fallback a voz del navegador):', errJson?.detail?.message || response.statusText);
+        const errMsg = errJson?.detail?.message || response.statusText;
+        console.warn(`[ElevenLabs] Error con voz [${targetVoice}]:`, errMsg);
+
+        // Auto fallback to free default voice (Bella: EXAVITQu4vr4xnSDxMaL) if library voice requires paid plan
+        if (targetVoice !== 'EXAVITQu4vr4xnSDxMaL' && (response.status === 402 || response.status === 400 || errMsg.includes('library voices') || errMsg.includes('paid_plan'))) {
+          console.log('[ElevenLabs] Usando voz estándar de alta fidelidad Bella (EXAVITQu4vr4xnSDxMaL)...');
+          return this.speakElevenLabs(text, onDone, 'EXAVITQu4vr4xnSDxMaL');
+        }
         return false;
       }
 

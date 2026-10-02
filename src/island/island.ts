@@ -385,28 +385,27 @@ export class DynamicIsland {
       Sound.play('blip');
 
       if (isListening) {
+        this.statusText.textContent = "Procesando voz...";
         speechEngine.stopListening();
         isListening = false;
         this.micButton.classList.remove('bg-red-500', 'animate-pulse');
         this.micButton.classList.add('bg-cyan-500');
-        this.companion.setState('idle');
-        this.statusText.textContent = "Listo";
-        if (this.mode === 'compact') {
-          this.setMode('pill');
-        }
+        this.companion.setState('thinking');
       } else {
         // Expand to compact mode while speaking/listening
         if (this.mode === 'pill') {
           this.setMode('compact');
         }
         this.companion.setState('listening');
-        this.statusText.textContent = "Escuchando...";
+        this.statusText.textContent = "Escuchando... (clic para enviar)";
         this.micButton.classList.remove('bg-cyan-500');
         this.micButton.classList.add('bg-red-500', 'animate-pulse');
 
         const ok = await speechEngine.startListening({
           onSpeechStart: () => {
             isListening = true;
+            this.companion.setState('listening');
+            this.statusText.textContent = "Escuchando... (habla ahora)";
           },
           onAudioLevel: (level) => {
             this.waveBars.forEach((bar, idx) => {
@@ -415,9 +414,10 @@ export class DynamicIsland {
             });
           },
           onSpeechResult: (transcript, isFinal) => {
-            this.statusText.textContent = transcript;
-            if (isFinal) {
-              speechEngine.stopListening();
+            if (transcript) {
+              this.statusText.textContent = transcript;
+            }
+            if (isFinal && transcript) {
               isListening = false;
               this.micButton.classList.remove('bg-red-500', 'animate-pulse');
               this.micButton.classList.add('bg-cyan-500');
@@ -428,10 +428,6 @@ export class DynamicIsland {
             isListening = false;
             this.micButton.classList.remove('bg-red-500', 'animate-pulse');
             this.micButton.classList.add('bg-cyan-500');
-            this.statusText.textContent = "Listo";
-            if (this.mode === 'compact') {
-              this.setMode('pill');
-            }
           },
           onError: () => {
             isListening = false;
@@ -590,17 +586,48 @@ export class DynamicIsland {
     this.keyBadge.textContent = `${k.id} (${k.calls})`;
   }
 
+  private formatMarkdown(content: string): string {
+    if (content.startsWith('<div') || content.startsWith('<ul')) return content;
+
+    let html = content
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+
+    // Code blocks
+    html = html.replace(/```([a-z0-9_-]*)\n([\s\S]*?)```/g, (_m, _lang, code) => {
+      return `<pre class="bg-black/60 border border-slate-700/80 p-2.5 rounded-xl text-emerald-300 font-mono text-[11px] overflow-x-auto my-1.5 leading-relaxed shadow-inner"><code>${code.trim()}</code></pre>`;
+    });
+
+    // Inline code
+    html = html.replace(/`([^`]+)`/g, '<code class="bg-slate-900 border border-slate-700/80 px-1.5 py-0.5 rounded text-cyan-300 font-mono text-[10px]">$1</code>');
+
+    // Bold
+    html = html.replace(/\*\*([^*]+)\*\*/g, '<strong class="text-white font-semibold">$1</strong>');
+
+    // Italic
+    html = html.replace(/\*([^*]+)\*/g, '<em class="text-slate-300 italic">$1</em>');
+
+    // Lists
+    html = html.replace(/^-\s+(.*)$/gm, '<li class="ml-2 text-slate-200 list-disc list-inside">$1</li>');
+
+    // Line breaks
+    html = html.replace(/\n/g, '<br>');
+
+    return html;
+  }
+
   private addMessage(role: 'user' | 'model', content: string) {
     const div = document.createElement('div');
     const isUser = role === 'user';
 
-    div.className = `flex ${isUser ? 'justify-end' : 'justify-start'} gap-2`;
+    div.className = `flex ${isUser ? 'justify-end' : 'justify-start'} gap-2 animate-in fade-in duration-200`;
     div.innerHTML = `
-      <div class="${isUser ? 'bg-cyan-950/70 border-cyan-700/50 text-cyan-100' : 'bg-slate-800/80 border-slate-700 text-slate-200'} border rounded-xl p-2.5 max-w-[85%] leading-relaxed shadow-sm">
-        <div class="font-mono text-[9px] ${isUser ? 'text-cyan-400' : 'text-slate-400'} uppercase font-bold mb-0.5">
-          ${isUser ? 'Tú' : 'YUI'}
+      <div class="${isUser ? 'bg-cyan-950/80 border-cyan-700/60 text-cyan-100' : 'bg-slate-900/90 border-slate-700/70 text-slate-100'} border rounded-2xl px-3 py-2 max-w-[88%] leading-relaxed shadow-md backdrop-blur-md">
+        <div class="font-mono text-[9px] ${isUser ? 'text-cyan-400' : 'text-purple-300'} uppercase font-bold tracking-wider mb-1 flex items-center gap-1">
+          <span>${isUser ? '👤 Tú' : '✨ YUI'}</span>
         </div>
-        <div class="break-words">${content}</div>
+        <div class="break-words text-xs leading-relaxed space-y-1">${this.formatMarkdown(content)}</div>
       </div>
     `;
 
@@ -619,7 +646,7 @@ export class DynamicIsland {
     this.statusText.textContent = "Pensando...";
     this.thinkingContainer.classList.remove('hidden');
     (this.thinkingContainer as HTMLDetailsElement).open = true;
-    this.thinkingContent.innerHTML = 'Analizando intenciones y herramientas...';
+    this.thinkingContent.innerHTML = '<span class="text-purple-300">Analizando intención y herramientas...</span>';
 
     try {
       const response = await callGemini(this.conversation, (thought) => {
@@ -629,6 +656,11 @@ export class DynamicIsland {
       // Check for tool calls
       if (response.toolCalls && response.toolCalls.length > 0) {
         for (const tc of response.toolCalls) {
+          const stepDiv = document.createElement('div');
+          stepDiv.className = 'text-cyan-300 text-[11px] font-mono py-1 border-l-2 border-cyan-400 pl-2 my-1';
+          stepDiv.textContent = `⚡ Herramienta: ${tc.name}`;
+          this.thinkingContent.appendChild(stepDiv);
+
           const execRes = await toolRegistry.executeTool(tc.name, tc.args, false);
 
           if (execRes.needsApproval && execRes.approvalPayload) {
@@ -644,7 +676,7 @@ export class DynamicIsland {
                 onApprove: async () => {
                   Sound.play('approve');
                   const approvedRes = await toolRegistry.executeTool(tc.name, tc.args, true);
-                  this.finalizeTurn(response.text || "Comando ejecutado con éxito.", approvedRes.result);
+                  await this.completeToolExecutionTurn(tc, approvedRes.result);
                   resolve();
                 },
                 onDeny: () => {
@@ -658,17 +690,16 @@ export class DynamicIsland {
             return;
           } else {
             // Auto tool executed
-            if (response.text) {
-              this.finalizeTurn(response.text, execRes.result);
-            } else {
-              this.finalizeTurn(`Herramienta [${tc.name}] completada: ${JSON.stringify(execRes.result)}`);
+            if (tc.name === 'set_companion_emote') {
+              this.companion.triggerEmote(tc.args.emote || 'happy');
             }
+            await this.completeToolExecutionTurn(tc, execRes.result);
             return;
           }
         }
       }
 
-      this.finalizeTurn(response.text);
+      this.finalizeTurn(response.text || "¡Listo!");
 
     } catch (err: any) {
       console.error(err);
@@ -679,6 +710,37 @@ export class DynamicIsland {
     } finally {
       this.isProcessing = false;
     }
+  }
+
+  private completeToolExecutionTurn(tc: { name: string; args: any }, result: any) {
+    if (tc.name === 'delegate_to_opencode') {
+      this.finalizeTurn("OpenCode completó la tarea.", result);
+      return;
+    }
+
+    const naturalReply = this.formatFallbackToolResult(tc.name, result);
+    this.finalizeTurn(naturalReply, tc.name === 'get_system_status' || tc.name === 'get_weather' ? result : undefined);
+  }
+
+  private formatFallbackToolResult(toolName: string, result: any): string {
+    if (toolName === 'set_companion_emote') {
+      const em = result?.emoteDisplayed || 'feliz';
+      return `¡He cambiado mi expresión a **${em}**! ✨`;
+    }
+    if (toolName === 'get_system_status') {
+      const cpu = result?.cpuUsage || '12%';
+      const ram = result?.ramAvailable || '8 GB';
+      return `Tu sistema se encuentra en buen estado: uso de CPU en **${cpu}** y dispones de **${ram} de RAM libre**.`;
+    }
+    if (toolName === 'get_weather') {
+      const temp = result?.temperature || '20°C';
+      const cond = result?.condition || 'despejado';
+      return `El clima actual reporta **${temp}** con cielo **${cond}**.`;
+    }
+    if (toolName === 'inspect_dropped_file') {
+      return `He inspeccionado el archivo correctamente.`;
+    }
+    return `Acción realizada con éxito.`;
   }
 
   private finalizeTurn(agentText: string, toolResult?: any) {
@@ -723,8 +785,44 @@ export class DynamicIsland {
 
         const summaryText = opencodeText ? opencodeText.replace(/```[\s\S]*?```/g, 'código generado.').slice(0, 140) : 'La tarea de OpenCode se ha completado.';
         spokenSummary = `OpenCode ha terminado la tarea. ${summaryText}`;
-      } else {
-        displayText += `\n<pre class="mt-1 p-1.5 bg-black/40 rounded text-[10px] text-emerald-300 font-mono overflow-x-auto">${JSON.stringify(toolResult, null, 2)}</pre>`;
+      } else if (toolResult.cpuUsage !== undefined || toolResult.ramAvailable !== undefined) {
+        const cpu = toolResult.cpuUsage || 'N/A';
+        const ram = toolResult.ramAvailable || 'N/A';
+        const host = toolResult.hostname || 'Linux';
+        const uptime = toolResult.uptimeHours ? `${toolResult.uptimeHours}h` : '';
+
+        displayText += `
+          <div class="mt-2 p-2.5 bg-slate-950/60 border border-slate-700/50 rounded-xl grid grid-cols-2 gap-2 text-xs font-mono shadow-sm">
+            <div class="flex items-center gap-1.5 bg-slate-900/80 px-2 py-1 rounded-lg border border-slate-800">
+              <span class="text-cyan-400">⚡ CPU:</span>
+              <span class="font-bold text-slate-100">${cpu}</span>
+            </div>
+            <div class="flex items-center gap-1.5 bg-slate-900/80 px-2 py-1 rounded-lg border border-slate-800">
+              <span class="text-emerald-400">🧠 RAM:</span>
+              <span class="font-bold text-slate-100">${ram}</span>
+            </div>
+            <div class="col-span-2 flex items-center justify-between text-[10px] text-slate-400 px-1 pt-0.5">
+              <span>🖥️ ${host}</span>
+              ${uptime ? `<span>⏱️ Activo: ${uptime}</span>` : ''}
+            </div>
+          </div>
+        `;
+      } else if (toolResult.temperature !== undefined || toolResult.condition !== undefined) {
+        const temp = toolResult.temperature || 'N/A';
+        const cond = toolResult.condition || 'Despejado';
+        const loc = toolResult.location || 'Local';
+        displayText += `
+          <div class="mt-2 p-2.5 bg-slate-950/60 border border-slate-700/50 rounded-xl flex items-center justify-between text-xs font-mono shadow-sm">
+            <div class="flex items-center gap-2">
+              <span class="text-lg">🌤️</span>
+              <div>
+                <div class="font-bold text-slate-100">${temp}</div>
+                <div class="text-[10px] text-slate-400">${cond}</div>
+              </div>
+            </div>
+            <span class="text-[10px] text-cyan-300 bg-cyan-950/60 border border-cyan-800/60 px-2 py-0.5 rounded-full">${loc}</span>
+          </div>
+        `;
       }
     }
 

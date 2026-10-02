@@ -330,7 +330,7 @@ export async function callGemini(
       if (!res.ok) {
         const errorText = await res.text();
         console.error(`[Gemini Pool] Error with key ${keyEntry.id}:`, errorText);
-        if (res.status >= 400 && res.status < 500) {
+        if (res.status === 401 || res.status === 403) {
           keyPool.markRateLimited(keyEntry.id);
           continue;
         }
