@@ -586,7 +586,7 @@ export class DynamicIsland {
   }
 
   public updateKeyBadge() {
-    const k = keyPool.getActiveKey();
+    const k = keyPool.getCurrentKey();
     this.keyBadge.textContent = `${k.id} (${k.calls})`;
   }
 

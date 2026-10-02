@@ -10,8 +10,26 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BIN_PATH="/home/niko/YUI/bin/yui-linux"
 
-# Detect running Electron YUI instance
-YUI_PID=$(pgrep -f "electron.*(yui|app\.asar)" | grep -v "^$$$" | head -n 1 || true)
+# Detect running Electron YUI main process
+find_yui_pid() {
+  if [ -n "$HYPRLAND_INSTANCE_SIGNATURE" ] && command -v hyprctl >/dev/null 2>&1; then
+    local hpid
+    hpid=$(hyprctl clients -j 2>/dev/null | jq -r '.[] | select(.class == "yui-companion") | .pid' 2>/dev/null | head -n 1 || true)
+    if [ -n "$hpid" ] && [ "$hpid" != "null" ]; then
+      echo "$hpid"
+      return
+    fi
+  fi
+  # Fallback to scanning proc for electron main process without --type=
+  for p in $(pgrep -f "electron.*app\.asar" 2>/dev/null || true); do
+    if [ "$p" != "$$" ] && ! grep -q -- "--type=" "/proc/$p/cmdline" 2>/dev/null; then
+      echo "$p"
+      return
+    fi
+  done
+}
+
+YUI_PID=$(find_yui_pid)
 
 # If --expand or -e flag is given, send SIGUSR1 to toggle expand/pill
 if [ "$1" = "--expand" ] || [ "$1" = "-e" ]; then
@@ -25,7 +43,7 @@ if [ -z "$YUI_PID" ]; then
   # Clean stale lock files
   rm -f "$HOME/.config/yui-companion/SingletonLock" "$HOME/.config/yui-companion/SingletonSocket" "$HOME/.config/yui-companion/SingletonCookie" 2>/dev/null || true
   rm -f "$HOME/.config/Electron/SingletonLock" "$HOME/.config/Electron/SingletonSocket" "$HOME/.config/Electron/SingletonCookie" 2>/dev/null || true
-  nohup "$BIN_PATH" >/dev/null 2>&1 &
+  nohup "$BIN_PATH" </dev/null >/dev/null 2>&1 & disown
   exit 0
 fi
 

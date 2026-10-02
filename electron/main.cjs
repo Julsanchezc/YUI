@@ -9,12 +9,10 @@ if (process.platform === 'win32') {
   app.setAppUserModelId('yui-companion');
 }
 
-// Memory optimization flags (reduce RAM from ~630MB to minimal footprint)
+// Memory optimization flags (safe for Linux GPU / Wayland)
 app.commandLine.appendSwitch('js-flags', '--max-old-space-size=128');
 app.commandLine.appendSwitch('disable-renderer-backgrounding');
 app.commandLine.appendSwitch('disable-background-timer-throttling', 'false');
-app.commandLine.appendSwitch('renderer-process-limit', '1');
-app.commandLine.appendSwitch('disable-gpu-shader-disk-cache');
 
 // Clean stale Chromium SingletonLock if the PID is dead
 function cleanStaleSingletonLock() {
@@ -118,6 +116,13 @@ function createWindow() {
       nodeIntegration: false,
       sandbox: false
     }
+  });
+
+  mainWindow.webContents.on('console-message', (event, level, message, line, sourceId) => {
+    console.log(`[Renderer] ${message} (${sourceId}:${line})`);
+  });
+  mainWindow.webContents.on('did-fail-load', (e, code, desc, url) => {
+    console.error(`[Load Error] ${code}: ${desc} at ${url}`);
   });
 
   mainWindow.once('ready-to-show', () => {

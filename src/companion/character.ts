@@ -56,22 +56,22 @@ export class CharacterEngine {
   // Particles
   private particles: Particle[] = [];
 
-  constructor(canvas: HTMLCanvasElement) {
+  constructor(canvas: HTMLCanvasElement, cssW = 28, cssH = 28) {
     this.canvas = canvas;
     const context = canvas.getContext('2d');
     if (!context) throw new Error("Canvas 2D context not available");
     this.ctx = context;
-    this.resize(72, 72);
+    this.resize(72, 72, cssW, cssH);
   }
 
-  public resize(w: number, h: number) {
+  public resize(w: number, h: number, cssW?: number, cssH?: number) {
     this.width = w;
     this.height = h;
     const dpr = window.devicePixelRatio || 1;
     this.canvas.width = w * dpr;
     this.canvas.height = h * dpr;
-    this.canvas.style.width = `${w}px`;
-    this.canvas.style.height = `${h}px`;
+    this.canvas.style.width = `${cssW ?? w}px`;
+    this.canvas.style.height = `${cssH ?? h}px`;
     this.ctx.scale(dpr, dpr);
   }
 
@@ -529,11 +529,17 @@ export class CharacterEngine {
 
   public startAnimation() {
     let prev = performance.now();
+    let lastRender = 0;
+    const targetFps = 30; // 30 FPS ensures buttery smooth expressions without pinning GPU
+    const frameInterval = 1000 / targetFps;
+
     const frame = (now: number) => {
+      requestAnimationFrame(frame);
+      if (now - lastRender < frameInterval) return;
       const dt = Math.min(0.1, (now - prev) / 1000);
       prev = now;
+      lastRender = now;
       this.update(dt);
-      requestAnimationFrame(frame);
     };
     requestAnimationFrame(frame);
   }

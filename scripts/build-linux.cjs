@@ -94,7 +94,7 @@ fi
 # Linux Wayland / X11 flags for smooth transparency and top-edge positioning
 FLAGS=()
 if [ -n "\$WAYLAND_DISPLAY" ]; then
-  FLAGS+=("--ozone-platform-hint=auto" "--enable-features=UseOzonePlatform,WaylandWindowDecorations")
+  FLAGS+=("--ozone-platform-hint=auto")
 fi
 
 # RAM and V8 memory optimization flags
@@ -102,8 +102,6 @@ FLAGS+=(
   '--js-flags=--max-old-space-size=128'
   '--disable-renderer-backgrounding'
   '--disable-background-timer-throttling=false'
-  '--renderer-process-limit=1'
-  '--disable-gpu-shader-disk-cache'
 )
 
 exec "\$ELECTRON_BIN" "\${FLAGS[@]}" "\$ASAR_PATH" "\$@"

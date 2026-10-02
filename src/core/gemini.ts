@@ -24,6 +24,7 @@ export interface AgentResponse {
 export class GeminiKeyPool {
   public keys: KeyEntry[] = [];
   private currentIndex: number = 0;
+  private isNotifying: boolean = false;
   public onKeyStatusChanged?: () => void;
 
   constructor() {
@@ -43,14 +44,32 @@ export class GeminiKeyPool {
         } catch (e) {}
       }
 
-      // Check for keys passed via environment or window globals
+      // Check for keys passed via environment JSON
+      const envKeysJson = (import.meta as any).env?.VITE_GEMINI_KEYS_JSON;
+      if (envKeysJson) {
+        try {
+          const parsed = JSON.parse(envKeysJson);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            this.keys = parsed.map((item: any) => ({
+              id: item.id || 'KEY',
+              key: item.key || '',
+              status: 'active' as const,
+              calls: 0,
+              lastUsed: 0
+            }));
+            return;
+          }
+        } catch (e) {}
+      }
+
+      // Check for keys passed via environment comma-separated
       const envKeys = (import.meta as any).env?.VITE_GEMINI_KEYS;
       if (envKeys) {
         try {
           const split = envKeys.split(',').map((k: string, idx: number) => ({
             id: `KEY_${idx + 1}`,
             key: k.trim(),
-            status: 'active',
+            status: 'active' as const,
             calls: 0,
             lastUsed: 0
           }));
@@ -60,12 +79,20 @@ export class GeminiKeyPool {
       }
     }
 
-    // Default placeholder pool if no keys entered yet
+    // Default placeholder pool (keys should be entered in .env or settings)
     this.keys = [
-      { id: "POOL_1", key: "", status: "active", calls: 0, lastUsed: 0 },
-      { id: "POOL_2", key: "", status: "active", calls: 0, lastUsed: 0 },
-      { id: "POOL_3", key: "", status: "active", calls: 0, lastUsed: 0 }
+      { id: "JA1", key: "", status: "active", calls: 0, lastUsed: 0 },
+      { id: "ND2", key: "", status: "active", calls: 0, lastUsed: 0 },
+      { id: "SA3", key: "", status: "active", calls: 0, lastUsed: 0 },
+      { id: "094", key: "", status: "active", calls: 0, lastUsed: 0 },
+      { id: "n75", key: "", status: "active", calls: 0, lastUsed: 0 },
+      { id: "bg6", key: "", status: "active", calls: 0, lastUsed: 0 },
+      { id: "NG7", key: "", status: "active", calls: 0, lastUsed: 0 }
     ];
+  }
+
+  public getCurrentKey(): KeyEntry {
+    return this.keys[this.currentIndex] || this.keys[0] || { id: "JA1", key: "", status: "active", calls: 0, lastUsed: 0 };
   }
 
   public getActiveKey(): KeyEntry {
@@ -118,7 +145,13 @@ export class GeminiKeyPool {
   }
 
   private notifyChange() {
-    if (this.onKeyStatusChanged) this.onKeyStatusChanged();
+    if (this.isNotifying) return;
+    this.isNotifying = true;
+    try {
+      if (this.onKeyStatusChanged) this.onKeyStatusChanged();
+    } finally {
+      this.isNotifying = false;
+    }
   }
 }
 
@@ -267,7 +300,7 @@ export async function callGemini(
       };
     }
 
-    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${keyEntry.key}`;
+    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent?key=${keyEntry.key}`;
 
     try {
       const payload = {
