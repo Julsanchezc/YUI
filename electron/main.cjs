@@ -9,6 +9,13 @@ if (process.platform === 'win32') {
   app.setAppUserModelId('yui-companion');
 }
 
+// Memory optimization flags (reduce RAM from ~630MB to minimal footprint)
+app.commandLine.appendSwitch('js-flags', '--max-old-space-size=128');
+app.commandLine.appendSwitch('disable-renderer-backgrounding');
+app.commandLine.appendSwitch('disable-background-timer-throttling', 'false');
+app.commandLine.appendSwitch('renderer-process-limit', '1');
+app.commandLine.appendSwitch('disable-gpu-shader-disk-cache');
+
 // Clean stale Chromium SingletonLock if the PID is dead
 function cleanStaleSingletonLock() {
   try {
@@ -37,10 +44,11 @@ function cleanStaleSingletonLock() {
 
 cleanStaleSingletonLock();
 
-// Dimensions for the Dynamic Island Notch
+// Dimensions for the 3 Dynamic Island Modes
 const SIZES = {
-  pill: { width: 380, height: 64 },
-  expanded: { width: 680, height: 560 }
+  pill: { width: 380, height: 42 },
+  compact: { width: 480, height: 56 },
+  expanded: { width: 640, height: 500 }
 };
 
 let mainWindow = null;
@@ -54,6 +62,22 @@ function getWindowBounds(mode) {
   const x = Math.round((screenWidth - size.width) / 2);
   const y = 0;
   return { x, y, width: size.width, height: size.height };
+}
+
+function updateWindowMode(mode) {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  currentMode = mode;
+  const newBounds = getWindowBounds(mode);
+  mainWindow.setBounds(newBounds, true);
+
+  if (process.platform === 'linux') {
+    if (process.env.HYPRLAND_INSTANCE_SIGNATURE) {
+      exec(`hyprctl dispatch resizewindowpixel "exact ${newBounds.width} ${newBounds.height},class:^(yui.*|yui-companion|electron)$"`, () => {});
+      exec(`hyprctl dispatch movewindowpixel "exact ${newBounds.x} 0,class:^(yui.*|yui-companion|electron)$"`, () => {});
+    } else if (process.env.WAYLAND_DISPLAY) {
+      exec(`swaymsg '[app_id="yui-companion"] resize set width ${newBounds.width} px height ${newBounds.height} px, move position ${newBounds.x} px 0 px'`, () => {});
+    }
+  }
 }
 
 function createWindow() {
@@ -85,9 +109,22 @@ function createWindow() {
     mainWindow.show();
     mainWindow.focus();
 
-    // In Sway, position window flush at top center
-    if (process.platform === 'linux' && process.env.WAYLAND_DISPLAY) {
-      exec(`swaymsg '[app_id="yui-companion"] move position ${bounds.x} px 0 px'`, () => {});
+    // Position and size window flush at top center (Hyprland or Sway)
+    if (process.platform === 'linux') {
+      if (process.env.HYPRLAND_INSTANCE_SIGNATURE) {
+        exec(`hyprctl dispatch resizewindowpixel "exact ${bounds.width} ${bounds.height},class:^(yui.*|yui-companion|electron)$"`, () => {});
+        exec(`hyprctl dispatch movewindowpixel "exact ${bounds.x} 0,class:^(yui.*|yui-companion|electron)$"`, () => {});
+      } else if (process.env.WAYLAND_DISPLAY) {
+        exec(`swaymsg '[app_id="yui-companion"] resize set width ${bounds.width} px height ${bounds.height} px, move position ${bounds.x} px 0 px'`, () => {});
+      }
+    }
+  });
+
+  // Auto-collapse when user clicks outside the window (onBlur)
+  mainWindow.on('blur', () => {
+    if (currentMode === 'expanded') {
+      mainWindow.webContents.send('yui:external-collapse');
+      updateWindowMode('pill');
     }
   });
 
@@ -120,15 +157,7 @@ function createWindow() {
 
   // Handle IPC mode changes from frontend
   ipcMain.on('yui:set-mode', (event, mode) => {
-    if (!mainWindow || mainWindow.isDestroyed()) return;
-    currentMode = mode;
-    const newBounds = getWindowBounds(mode);
-    mainWindow.setBounds(newBounds, true);
-
-    // On Sway, ensure x position is re-centered when width expands/collapses
-    if (process.platform === 'linux' && process.env.WAYLAND_DISPLAY) {
-      exec(`swaymsg '[app_id="yui-companion"] move position ${newBounds.x} px 0 px'`, () => {});
-    }
+    updateWindowMode(mode);
   });
 
   ipcMain.on('yui:resize', (event, { width, height }) => {
@@ -161,6 +190,26 @@ function createWindow() {
     mainWindow = null;
   });
 }
+
+// Global OS signal listeners (SIGUSR1 / SIGUSR2) to toggle expanded mode instantly
+function toggleExpandMode() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (currentMode === 'expanded') {
+    mainWindow.webContents.send('yui:external-collapse');
+    updateWindowMode('pill');
+  } else {
+    mainWindow.webContents.send('yui:toggle-expand');
+    updateWindowMode('expanded');
+    mainWindow.focus();
+  }
+}
+
+try {
+  process.removeAllListeners('SIGUSR1');
+} catch (e) {}
+
+process.on('SIGUSR1', toggleExpandMode);
+process.on('SIGUSR2', toggleExpandMode);
 
 // Ensure single instance
 const gotTheLock = app.requestSingleInstanceLock();

@@ -6,5 +6,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   setMode: (mode) => ipcRenderer.send('yui:set-mode', mode),
   resize: (width, height) => ipcRenderer.send('yui:resize', { width, height }),
   close: () => ipcRenderer.send('yui:close'),
-  minimize: () => ipcRenderer.send('yui:minimize')
+  minimize: () => ipcRenderer.send('yui:minimize'),
+  onCollapse: (callback) => {
+    ipcRenderer.on('yui:external-collapse', () => callback());
+  },
+  onToggleExpand: (callback) => {
+    ipcRenderer.on('yui:toggle-expand', () => callback());
+  }
 });

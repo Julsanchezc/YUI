@@ -1,4 +1,5 @@
 // Dynamic Island State Machine & UI Manager
+// Supports 3 Distinct Modes: Pill (380x42), Compact (480x56), Expanded (640x500)
 
 import { CharacterEngine } from '../companion/character';
 import { Sound } from '../core/audio-sfx';
@@ -7,7 +8,7 @@ import { speechEngine } from '../core/speech';
 import { toolRegistry } from '../core/tools';
 import { ApprovalManager } from './approval';
 
-export type IslandMode = 'hidden' | 'peek' | 'pill' | 'expanded';
+export type IslandMode = 'pill' | 'compact' | 'expanded';
 
 export class DynamicIsland {
   public root: HTMLElement;
@@ -30,6 +31,9 @@ export class DynamicIsland {
   private keyBadge: HTMLElement;
   private approvalContainer: HTMLElement;
   private waveBars: HTMLElement[];
+  private collapseBtn: HTMLElement;
+  private toggleBtn: HTMLElement;
+  private audioWaveContainer: HTMLElement;
 
   // Conversation Context
   private conversation: { role: 'user' | 'model'; parts: any[] }[] = [];
@@ -53,6 +57,9 @@ export class DynamicIsland {
     this.keyBadge = root.querySelector('#keyBadge')!;
     this.approvalContainer = root.querySelector('#approvalContainer')!;
     this.waveBars = Array.from(root.querySelectorAll('.wave-bar'));
+    this.collapseBtn = root.querySelector('#collapseBtn')!;
+    this.toggleBtn = root.querySelector('#toggleExpandBtn')!;
+    this.audioWaveContainer = root.querySelector('#audioWaveContainer')!;
 
     // Init Companion Engine
     this.companion = new CharacterEngine(this.canvasElement);
@@ -64,7 +71,11 @@ export class DynamicIsland {
     this.setupEventListeners();
     this.setupSpeechEvents();
     this.setupFileDropEvents();
+    this.setupIpcEvents();
     this.updateKeyBadge();
+
+    // Set initial mode cleanly
+    this.applyModeStyles('pill');
 
     // Greeting on launch
     setTimeout(() => {
@@ -75,99 +86,110 @@ export class DynamicIsland {
 
   private renderLayout() {
     this.root.innerHTML = `
-      <div id="islandContainer" class="fixed top-0 left-0 right-0 flex justify-center z-50 pointer-events-none select-none transition-all duration-300">
+      <div id="islandContainer" class="fixed top-0 left-0 right-0 flex justify-center z-50 pointer-events-none select-none">
         
         <!-- The Floating Notch / Dynamic Island -->
-        <div id="islandNotch" class="pointer-events-auto bg-slate-950/95 backdrop-blur-xl border border-slate-800/80 rounded-b-3xl shadow-2xl transition-all duration-300 flex flex-col items-center overflow-hidden">
+        <div id="islandNotch" class="pointer-events-auto yui-notch-acrylic w-[380px] h-[42px] px-3 flex flex-col items-center bg-slate-950/90 backdrop-blur-xl transition-all duration-300 ease-out overflow-hidden shadow-2xl">
           
-          <!-- Compact Island Bar (Always accessible) -->
-          <div id="notchHeader" class="w-full flex items-center justify-between px-4 py-2 gap-3 cursor-pointer hover:bg-slate-900/40 transition">
+          <!-- Compact Island Bar (Always accessible, height adjusted per mode) -->
+          <div id="notchHeader" class="w-full flex items-center justify-between h-[42px] gap-2 cursor-pointer transition flex-shrink-0">
             
             <!-- Left: Companion Avatar & Mini Info -->
-            <div class="flex items-center gap-3">
-              <div class="relative w-10 h-10 flex items-center justify-center">
-                <canvas id="companionCanvas" width="72" height="72" class="cursor-pointer transition-transform hover:scale-110 active:scale-95"></canvas>
+            <div class="flex items-center gap-2 min-w-0">
+              <div class="relative w-7 h-7 flex items-center justify-center flex-shrink-0">
+                <canvas id="companionCanvas" width="72" height="72" class="w-7 h-7 cursor-pointer transition-transform hover:scale-110 active:scale-95"></canvas>
               </div>
               
-              <div class="flex flex-col">
+              <div class="flex flex-col min-w-0">
                 <div class="flex items-center gap-1.5">
                   <span class="font-bold text-xs tracking-wider text-slate-100 font-mono">YUI</span>
-                  <span id="pillBadge" class="w-2 h-2 rounded-full bg-cyan-400"></span>
+                  <span id="pillBadge" class="w-1.5 h-1.5 rounded-full bg-cyan-400"></span>
                 </div>
-                <span id="statusText" class="text-[10px] text-slate-400 font-mono truncate max-w-[150px]">En espera</span>
+                <span id="statusText" class="text-[9px] text-slate-400 font-mono truncate max-w-[130px]">En espera</span>
               </div>
             </div>
 
-            <!-- Center: Audio Reactive Waves (Visible when listening/speaking) -->
-            <div id="audioWaveContainer" class="hidden md:flex items-center gap-1 h-5 px-3">
-              <div class="w-1 bg-cyan-400 rounded-full h-2 wave-bar transition-all"></div>
-              <div class="w-1 bg-cyan-400 rounded-full h-3 wave-bar transition-all"></div>
-              <div class="w-1 bg-cyan-400 rounded-full h-1.5 wave-bar transition-all"></div>
-              <div class="w-1 bg-cyan-400 rounded-full h-4 wave-bar transition-all"></div>
-              <div class="w-1 bg-cyan-400 rounded-full h-2 wave-bar transition-all"></div>
+            <!-- Center: Audio Reactive Waves (Active on listening / speaking) -->
+            <div id="audioWaveContainer" class="flex items-center gap-1 h-4 px-2">
+              <div class="w-0.5 bg-cyan-400 rounded-full h-1.5 wave-bar transition-all"></div>
+              <div class="w-0.5 bg-cyan-400 rounded-full h-3 wave-bar transition-all"></div>
+              <div class="w-0.5 bg-cyan-400 rounded-full h-1 wave-bar transition-all"></div>
+              <div class="w-0.5 bg-cyan-400 rounded-full h-3.5 wave-bar transition-all"></div>
+              <div class="w-0.5 bg-cyan-400 rounded-full h-1.5 wave-bar transition-all"></div>
             </div>
 
-            <!-- Right: Quick Controls & Key Pool -->
-            <div class="flex items-center gap-2">
-              <button id="keyBadge" class="text-[10px] font-mono bg-slate-900 border border-slate-700/60 px-2 py-0.5 rounded text-cyan-300 hover:border-cyan-500/50 transition">
-                Pool: JA1
+            <!-- Right: Controls & Badges -->
+            <div class="flex items-center gap-1.5 flex-shrink-0">
+              <button id="keyBadge" class="text-[9px] font-mono bg-slate-900 border border-slate-700/60 px-1.5 py-0.5 rounded text-cyan-300 hover:border-cyan-500/50 transition">
+                JA1
               </button>
 
-              <button id="micButton" title="Hablar con YUI (STT)" class="w-8 h-8 rounded-full bg-cyan-500 hover:bg-cyan-400 text-slate-950 flex items-center justify-center transition shadow-md shadow-cyan-500/20 active:scale-95">
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"/></svg>
+              <button id="micButton" title="Hablar con YUI (STT)" class="w-6 h-6 rounded-full bg-cyan-500 hover:bg-cyan-400 text-slate-950 flex items-center justify-center transition shadow-sm active:scale-95">
+                <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"/></svg>
               </button>
 
-              <button id="toggleExpandBtn" class="text-slate-400 hover:text-slate-200 p-1 rounded transition">
-                <svg id="expandIcon" class="w-4 h-4 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+              <!-- Minimize / Collapse Button (Visible in Expanded mode) -->
+              <button id="collapseBtn" title="Colapsar a píldora (Ctrl+K)" class="hidden text-slate-400 hover:text-cyan-300 p-1 rounded-lg bg-slate-900/80 border border-slate-700 hover:border-cyan-500 transition text-[11px] font-mono items-center gap-0.5">
+                <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 15l7-7 7 7"/></svg>
+                <span>−</span>
               </button>
 
+              <!-- Chevron Toggle Button -->
+              <button id="toggleExpandBtn" title="Expandir chat (Ctrl+K)" class="text-slate-400 hover:text-slate-200 p-1 rounded transition">
+                <svg id="expandIcon" class="w-3.5 h-3.5 transition-transform duration-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+              </button>
+
+              <!-- Close Desktop Button -->
               <button id="closeDesktopBtn" title="Cerrar YUI" class="text-slate-500 hover:text-rose-400 p-1 rounded transition hidden">
-                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
               </button>
             </div>
 
           </div>
 
           <!-- Expanded Body (Chat, Thinking trace, Tools, Drop-file) -->
-          <div id="expandedPanel" class="w-full max-w-2xl px-4 pb-4 space-y-3 hidden animate-in fade-in slide-in-from-top-3">
+          <div id="expandedPanel" class="w-full flex-1 flex flex-col min-h-0 space-y-2 pt-1 pb-3 px-1 hidden animate-in fade-in slide-in-from-top-2">
             
             <!-- Approval Card Container (Human-in-the-loop) -->
             <div id="approvalContainer" class="hidden"></div>
 
-            <!-- Thinking Trace (Agent Reasoning) -->
-            <div id="thinkingContainer" class="hidden bg-slate-900/80 border border-purple-500/30 rounded-xl p-3 text-xs font-mono text-purple-200 space-y-1">
-              <div class="flex items-center gap-1.5 text-purple-400 font-bold uppercase text-[10px] tracking-wider">
-                <span class="animate-spin">⚙</span>
-                <span>Pensamiento Agéntico (Gemini 2.0 Reasoning)</span>
-              </div>
-              <div id="thinkingContent" class="text-slate-300 text-[11px] leading-relaxed max-h-28 overflow-y-auto pl-2 border-l border-purple-500/40"></div>
-            </div>
+            <!-- Thinking Trace (Collapsible Accordion) -->
+            <details id="thinkingContainer" class="hidden bg-slate-900/80 border border-purple-500/30 rounded-xl p-2 text-xs font-mono text-purple-200 group">
+              <summary class="cursor-pointer font-bold uppercase text-[10px] tracking-wider text-purple-400 flex items-center justify-between select-none list-none">
+                <div class="flex items-center gap-1.5">
+                  <span class="animate-spin">⚙</span>
+                  <span>Pensamiento Agéntico (Gemini 2.0 Reasoning)</span>
+                </div>
+                <span class="text-[9px] text-purple-400/80 group-open:rotate-180 transition-transform">▼</span>
+              </summary>
+              <div id="thinkingContent" class="text-slate-300 text-[11px] leading-relaxed max-h-24 overflow-y-auto pl-2 border-l border-purple-500/40 mt-1.5"></div>
+            </details>
 
             <!-- Messages Stream -->
-            <div id="messagesContainer" class="h-64 overflow-y-auto space-y-2.5 p-2 bg-slate-900/40 rounded-xl border border-slate-800 text-xs">
+            <div id="messagesContainer" class="flex-1 overflow-y-auto space-y-2 p-2.5 bg-slate-900/50 rounded-xl border border-slate-800 text-xs min-h-[160px] max-h-[260px]">
               <!-- Dynamically populated -->
             </div>
 
             <!-- Input Bar -->
-            <div class="flex items-center gap-2 pt-1">
-              <input type="text" id="textInput" placeholder="Escribe o habla con YUI... (o suelta un archivo aquí)"
-                     class="flex-1 bg-slate-900/90 border border-slate-700 rounded-xl px-3.5 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-cyan-500">
+            <div class="flex items-center gap-2 pt-0.5">
+              <input type="text" id="textInput" placeholder="Escribe o habla con YUI... (Ctrl+K para minimizar)"
+                     class="flex-1 bg-slate-900/90 border border-slate-700 rounded-xl px-3 py-1.5 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-cyan-500">
               
-              <button id="sendBtn" class="bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold px-3 py-2 rounded-xl text-xs flex items-center gap-1 transition active:scale-95">
+              <button id="sendBtn" class="bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold px-3 py-1.5 rounded-xl text-xs flex items-center gap-1 transition active:scale-95 shadow-sm">
                 <span>Enviar</span>
               </button>
             </div>
 
             <!-- Quick Action Pills -->
-            <div class="flex flex-wrap items-center justify-between text-[11px] text-slate-400 pt-1 font-mono">
+            <div class="flex flex-wrap items-center justify-between text-[10px] text-slate-400 pt-0.5 font-mono">
               <div class="flex items-center gap-2">
-                <span>Acciones rápidas:</span>
+                <span>Acciones:</span>
                 <button onclick="window.yuiTriggerQuick('¿Cuál es el estado del sistema?')" class="hover:text-cyan-300 underline">📊 Sistema</button>
                 <button onclick="window.yuiTriggerQuick('¿Qué clima hace hoy?')" class="hover:text-cyan-300 underline">🌤️ Clima</button>
                 <button onclick="window.yuiTriggerQuick('OpenCode, crea una función en TypeScript para formatear fechas')" class="hover:text-purple-300 text-purple-400 font-bold underline">⚡ OpenCode</button>
               </div>
 
-              <div class="flex items-center gap-3">
+              <div class="flex items-center gap-2.5">
                 <label class="flex items-center gap-1 cursor-pointer">
                   <input type="checkbox" id="ttsToggle" checked class="accent-cyan-400">
                   <span>TTS</span>
@@ -196,37 +218,35 @@ export class DynamicIsland {
       this.companion.onCursorMove(e.clientX, e.clientY);
     });
 
-    // Expand/Collapse toggle
-    const toggleBtn = this.root.querySelector('#toggleExpandBtn')!;
+    // Header toggle
     const header = this.root.querySelector('#notchHeader')!;
-    
-    const toggleExpand = () => {
-      if (this.mode === 'expanded') {
-        this.setMode('pill');
-      } else {
-        this.setMode('expanded');
-      }
-    };
-
-    toggleBtn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      toggleExpand();
+    header.addEventListener('click', (e) => {
+      const target = e.target as HTMLElement;
+      if (target.closest('button') || target.closest('canvas')) return;
+      this.toggleExpand();
     });
 
-    header.addEventListener('click', () => {
-      toggleExpand();
+    this.toggleBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.toggleExpand();
+    });
+
+    // Collapse button in expanded header
+    this.collapseBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.setMode('pill');
     });
 
     // Close desktop button
     const closeDesktopBtn = this.root.querySelector('#closeDesktopBtn') as HTMLElement;
     if (closeDesktopBtn) {
-      if (window.electronAPI || (window as any).__TAURI__) {
+      if ((window as any).electronAPI || (window as any).__TAURI__) {
         closeDesktopBtn.classList.remove('hidden');
       }
       closeDesktopBtn.addEventListener('click', (e) => {
         e.stopPropagation();
-        if (window.electronAPI?.close) {
-          window.electronAPI.close();
+        if ((window as any).electronAPI?.close) {
+          (window as any).electronAPI.close();
         } else if ((window as any).__TAURI__?.process?.exit) {
           (window as any).__TAURI__.process.exit(0);
         } else {
@@ -260,6 +280,27 @@ export class DynamicIsland {
       if (e.key === 'Enter') sendMsg();
     });
 
+    // Global Keyboard Shortcuts (Ctrl+K to toggle, Escape to collapse)
+    window.addEventListener('keydown', (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        this.toggleExpand();
+      } else if (e.key === 'Escape' && this.mode === 'expanded') {
+        e.preventDefault();
+        this.setMode('pill');
+      }
+    });
+
+    // Click outside detection: click outside the notch collapses to pill
+    document.addEventListener('click', (e) => {
+      if (this.mode === 'expanded') {
+        const target = e.target as HTMLElement;
+        if (!this.notchElement.contains(target)) {
+          this.setMode('pill');
+        }
+      }
+    });
+
     // Emote quick button
     const btnEmote = this.root.querySelector('#btnEmoteQuick')!;
     const emotes = ['love', 'proud', 'surprised', 'wink', 'happy'];
@@ -281,15 +322,16 @@ export class DynamicIsland {
       this.companion.triggerEmote(emote);
     };
 
-    // OpenCode Live State & Thinking Trace in Dynamic Island Notch
+    // OpenCode Live State & Thinking Trace
     toolRegistry.onOpenCodeProgress = (status: string, detail?: string) => {
       this.statusText.textContent = status;
       if (this.pillBadge) {
-        this.pillBadge.className = 'w-2 h-2 rounded-full bg-violet-400 animate-pulse';
+        this.pillBadge.className = 'w-1.5 h-1.5 rounded-full bg-violet-400 animate-pulse';
       }
       this.companion.setState('thinking');
       if (detail) {
         this.thinkingContainer.classList.remove('hidden');
+        (this.thinkingContainer as HTMLDetailsElement).open = true;
         const stepEl = document.createElement('div');
         stepEl.className = 'text-cyan-300 text-[11px] font-mono py-0.5 border-l-2 border-cyan-400 pl-2 my-0.5';
         stepEl.textContent = `⚡ [${status}] ${detail}`;
@@ -300,12 +342,39 @@ export class DynamicIsland {
 
     toolRegistry.onOpenCodeThought = (thought: string) => {
       this.thinkingContainer.classList.remove('hidden');
+      (this.thinkingContainer as HTMLDetailsElement).open = true;
       const thoughtEl = document.createElement('div');
       thoughtEl.className = 'text-purple-200 text-[11px] font-mono py-0.5 pl-2 border-l-2 border-purple-500 my-0.5 leading-relaxed';
       thoughtEl.textContent = thought;
       this.thinkingContent.appendChild(thoughtEl);
       this.thinkingContent.scrollTop = this.thinkingContent.scrollHeight;
     };
+  }
+
+  private setupIpcEvents() {
+    const api = (window as any).electronAPI;
+    if (api) {
+      if (api.onCollapse) {
+        api.onCollapse(() => {
+          if (this.mode === 'expanded') {
+            this.setMode('pill');
+          }
+        });
+      }
+      if (api.onToggleExpand) {
+        api.onToggleExpand(() => {
+          this.toggleExpand();
+        });
+      }
+    }
+  }
+
+  public toggleExpand() {
+    if (this.mode === 'expanded') {
+      this.setMode('pill');
+    } else {
+      this.setMode('expanded');
+    }
   }
 
   private setupSpeechEvents() {
@@ -322,8 +391,14 @@ export class DynamicIsland {
         this.micButton.classList.add('bg-cyan-500');
         this.companion.setState('idle');
         this.statusText.textContent = "Listo";
+        if (this.mode === 'compact') {
+          this.setMode('pill');
+        }
       } else {
-        this.setMode('expanded');
+        // Expand to compact mode while speaking/listening
+        if (this.mode === 'pill') {
+          this.setMode('compact');
+        }
         this.companion.setState('listening');
         this.statusText.textContent = "Escuchando...";
         this.micButton.classList.remove('bg-cyan-500');
@@ -334,9 +409,8 @@ export class DynamicIsland {
             isListening = true;
           },
           onAudioLevel: (level) => {
-            // Animate wave bars
             this.waveBars.forEach((bar, idx) => {
-              const h = Math.max(4, Math.min(24, level * 30 * (1 + (idx % 3) * 0.3)));
+              const h = Math.max(3, Math.min(18, level * 25 * (1 + (idx % 3) * 0.3)));
               bar.style.height = `${h}px`;
             });
           },
@@ -355,17 +429,26 @@ export class DynamicIsland {
             this.micButton.classList.remove('bg-red-500', 'animate-pulse');
             this.micButton.classList.add('bg-cyan-500');
             this.statusText.textContent = "Listo";
+            if (this.mode === 'compact') {
+              this.setMode('pill');
+            }
           },
           onError: () => {
             isListening = false;
             this.micButton.classList.remove('bg-red-500', 'animate-pulse');
             this.micButton.classList.add('bg-cyan-500');
             this.statusText.textContent = "Listo";
+            if (this.mode === 'compact') {
+              this.setMode('pill');
+            }
           }
         });
 
         if (!ok) {
           alert("Por favor concede permiso de micrófono a tu navegador para hablar con YUI.");
+          if (this.mode === 'compact') {
+            this.setMode('pill');
+          }
         }
       }
     });
@@ -377,11 +460,17 @@ export class DynamicIsland {
 
     speechEngine.onSpeakingChange = (speaking) => {
       if (speaking) {
+        if (this.mode === 'pill') {
+          this.setMode('compact');
+        }
         this.companion.setState('speaking');
         this.statusText.textContent = "Hablando...";
       } else {
         this.companion.setState('idle');
         this.statusText.textContent = "Listo";
+        if (this.mode === 'compact') {
+          this.setMode('pill');
+        }
       }
     };
 
@@ -398,7 +487,7 @@ export class DynamicIsland {
 
     window.addEventListener('dragover', (e) => {
       e.preventDefault();
-      this.companion.setMorph(1.0); // Box swallow shape
+      this.companion.setMorph(1.0);
       notch.classList.add('ring-2', 'ring-cyan-400', 'ring-dashed');
       this.statusText.textContent = "¡Suelta el archivo aquí!";
     });
@@ -420,7 +509,7 @@ export class DynamicIsland {
       if (!files || files.length === 0) return;
 
       const file = files[0];
-      Sound.play('gulp'); // Swallow sound!
+      Sound.play('gulp');
       this.companion.triggerEmote('love', 2.0);
 
       let textPreview = '';
@@ -436,34 +525,69 @@ export class DynamicIsland {
     });
   }
 
-  public setMode(mode: IslandMode) {
-    this.mode = mode;
+  private applyModeStyles(mode: IslandMode) {
+    const notch = this.notchElement;
+    const expandPanel = this.expandedPanel;
     const expandIcon = this.root.querySelector('#expandIcon');
+    const collapseBtn = this.collapseBtn;
+    const toggleBtn = this.toggleBtn;
+
+    // Reset size classes
+    notch.classList.remove('w-[380px]', 'h-[42px]', 'w-[480px]', 'h-[56px]', 'w-[640px]', 'h-[500px]');
 
     if (mode === 'expanded') {
-      this.expandedPanel.classList.remove('hidden');
+      notch.classList.add('w-[640px]', 'h-[500px]');
+      expandPanel.classList.remove('hidden');
+      expandPanel.classList.add('flex');
+      collapseBtn.classList.remove('hidden');
+      collapseBtn.classList.add('flex');
+      toggleBtn.classList.add('hidden');
       if (expandIcon) expandIcon.classList.add('rotate-180');
-      Sound.play('open');
-      if (window.electronAPI?.setMode) {
-        window.electronAPI.setMode('expanded');
-      } else if ((window as any).__TAURI__?.core?.invoke) {
-        (window as any).__TAURI__.core.invoke('resize_notch', { expanded: true });
-      }
-    } else {
-      this.expandedPanel.classList.add('hidden');
+      // Focus input field in expanded mode
+      setTimeout(() => this.textInput.focus(), 150);
+    } else if (mode === 'compact') {
+      notch.classList.add('w-[480px]', 'h-[56px]');
+      expandPanel.classList.add('hidden');
+      expandPanel.classList.remove('flex');
+      collapseBtn.classList.add('hidden');
+      collapseBtn.classList.remove('flex');
+      toggleBtn.classList.remove('hidden');
       if (expandIcon) expandIcon.classList.remove('rotate-180');
+    } else { // pill
+      notch.classList.add('w-[380px]', 'h-[42px]');
+      expandPanel.classList.add('hidden');
+      expandPanel.classList.remove('flex');
+      collapseBtn.classList.add('hidden');
+      collapseBtn.classList.remove('flex');
+      toggleBtn.classList.remove('hidden');
+      if (expandIcon) expandIcon.classList.remove('rotate-180');
+    }
+  }
+
+  public setMode(mode: IslandMode) {
+    if (this.mode === mode) return;
+    const prevMode = this.mode;
+    this.mode = mode;
+
+    this.applyModeStyles(mode);
+
+    if (mode === 'expanded') {
+      Sound.play('open');
+    } else if (prevMode === 'expanded') {
       Sound.play('close');
-      if (window.electronAPI?.setMode) {
-        window.electronAPI.setMode('pill');
-      } else if ((window as any).__TAURI__?.core?.invoke) {
-        (window as any).__TAURI__.core.invoke('resize_notch', { expanded: false });
-      }
+    }
+
+    const api = (window as any).electronAPI;
+    if (api?.setMode) {
+      api.setMode(mode);
+    } else if ((window as any).__TAURI__?.core?.invoke) {
+      (window as any).__TAURI__.core.invoke('resize_notch', { mode });
     }
   }
 
   public updateKeyBadge() {
     const k = keyPool.getActiveKey();
-    this.keyBadge.textContent = `Key: ${k.id} (${k.calls})`;
+    this.keyBadge.textContent = `${k.id} (${k.calls})`;
   }
 
   private addMessage(role: 'user' | 'model', content: string) {
@@ -494,14 +618,13 @@ export class DynamicIsland {
     this.companion.setState('thinking');
     this.statusText.textContent = "Pensando...";
     this.thinkingContainer.classList.remove('hidden');
+    (this.thinkingContainer as HTMLDetailsElement).open = true;
     this.thinkingContent.innerHTML = 'Analizando intenciones y herramientas...';
 
     try {
       const response = await callGemini(this.conversation, (thought) => {
         this.thinkingContent.textContent = thought;
       });
-
-      this.thinkingContainer.classList.add('hidden');
 
       // Check for tool calls
       if (response.toolCalls && response.toolCalls.length > 0) {
@@ -562,13 +685,11 @@ export class DynamicIsland {
     let displayText = agentText;
     let spokenSummary = agentText;
 
-    // Reset notch pill badge to standard cyan
     if (this.pillBadge) {
-      this.pillBadge.className = 'w-2 h-2 rounded-full bg-cyan-400';
+      this.pillBadge.className = 'w-1.5 h-1.5 rounded-full bg-cyan-400';
     }
 
     if (toolResult) {
-      // Check if toolResult is from OpenCode
       if (toolResult.toolsUsed !== undefined || toolResult.sessionId !== undefined) {
         this.statusText.textContent = "OpenCode: Completado ✓";
         this.companion.triggerEmote('proud', 2.0);
@@ -600,7 +721,6 @@ export class DynamicIsland {
           </div>
         `;
 
-        // YUI synthesizes via voice (TTS)
         const summaryText = opencodeText ? opencodeText.replace(/```[\s\S]*?```/g, 'código generado.').slice(0, 140) : 'La tarea de OpenCode se ha completado.';
         spokenSummary = `OpenCode ha terminado la tarea. ${summaryText}`;
       } else {
@@ -615,6 +735,9 @@ export class DynamicIsland {
     speechEngine.speak(spokenSummary, () => {
       this.companion.setState('idle');
       this.statusText.textContent = "Listo";
+      if (this.mode === 'compact') {
+        this.setMode('pill');
+      }
     });
 
     this.isProcessing = false;
