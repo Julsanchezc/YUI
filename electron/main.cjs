@@ -60,8 +60,31 @@ function getWindowBounds(mode) {
   const { width: screenWidth } = primaryDisplay.workAreaSize;
   const size = SIZES[mode] || SIZES.pill;
   const x = Math.round((screenWidth - size.width) / 2);
-  const y = 0;
+  const y = 30;
   return { x, y, width: size.width, height: size.height };
+}
+
+function applyCompositorGeometry(width, height, x, y = 30) {
+  if (process.platform !== 'linux') return;
+  if (process.env.HYPRLAND_INSTANCE_SIGNATURE) {
+    exec('hyprctl clients -j', (err, stdout) => {
+      if (!err && stdout) {
+        try {
+          const clients = JSON.parse(stdout);
+          const yui = clients.find(c => c.class === 'yui-companion' || (c.class && c.class.toLowerCase().includes('yui')));
+          if (yui) {
+            exec(`hyprctl dispatch resizewindowpixel "exact ${width} ${height},address:${yui.address}"`, () => {
+              setTimeout(() => {
+                exec(`hyprctl dispatch movewindowpixel "exact ${x} ${y},address:${yui.address}"`);
+              }, 30);
+            });
+          }
+        } catch (e) {}
+      }
+    });
+  } else if (process.env.WAYLAND_DISPLAY) {
+    exec(`swaymsg '[app_id="yui-companion"] resize set width ${width} px height ${height} px, move position ${x} px ${y} px'`, () => {});
+  }
 }
 
 function updateWindowMode(mode) {
@@ -69,15 +92,7 @@ function updateWindowMode(mode) {
   currentMode = mode;
   const newBounds = getWindowBounds(mode);
   mainWindow.setBounds(newBounds, true);
-
-  if (process.platform === 'linux') {
-    if (process.env.HYPRLAND_INSTANCE_SIGNATURE) {
-      exec(`hyprctl dispatch resizewindowpixel "exact ${newBounds.width} ${newBounds.height},class:^(yui.*|yui-companion|electron)$"`, () => {});
-      exec(`hyprctl dispatch movewindowpixel "exact ${newBounds.x} 0,class:^(yui.*|yui-companion|electron)$"`, () => {});
-    } else if (process.env.WAYLAND_DISPLAY) {
-      exec(`swaymsg '[app_id="yui-companion"] resize set width ${newBounds.width} px height ${newBounds.height} px, move position ${newBounds.x} px 0 px'`, () => {});
-    }
-  }
+  applyCompositorGeometry(newBounds.width, newBounds.height, newBounds.x, newBounds.y);
 }
 
 function createWindow() {
@@ -109,15 +124,7 @@ function createWindow() {
     mainWindow.show();
     mainWindow.focus();
 
-    // Position and size window flush at top center (Hyprland or Sway)
-    if (process.platform === 'linux') {
-      if (process.env.HYPRLAND_INSTANCE_SIGNATURE) {
-        exec(`hyprctl dispatch resizewindowpixel "exact ${bounds.width} ${bounds.height},class:^(yui.*|yui-companion|electron)$"`, () => {});
-        exec(`hyprctl dispatch movewindowpixel "exact ${bounds.x} 0,class:^(yui.*|yui-companion|electron)$"`, () => {});
-      } else if (process.env.WAYLAND_DISPLAY) {
-        exec(`swaymsg '[app_id="yui-companion"] resize set width ${bounds.width} px height ${bounds.height} px, move position ${bounds.x} px 0 px'`, () => {});
-      }
-    }
+    applyCompositorGeometry(bounds.width, bounds.height, bounds.x, bounds.y);
   });
 
   // Auto-collapse when user clicks outside the window (onBlur)
@@ -166,10 +173,7 @@ function createWindow() {
     const { width: screenWidth } = primaryDisplay.workAreaSize;
     const x = Math.round((screenWidth - width) / 2);
     mainWindow.setBounds({ x, y: 0, width, height }, true);
-
-    if (process.platform === 'linux' && process.env.WAYLAND_DISPLAY) {
-      exec(`swaymsg '[app_id="yui-companion"] move position ${x} px 0 px'`, () => {});
-    }
+    applyCompositorGeometry(width, height, x, 0);
   });
 
   ipcMain.on('yui:close', () => {

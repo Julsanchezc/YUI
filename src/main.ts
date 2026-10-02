@@ -11,23 +11,23 @@ declare global {
       resize: (width: number, height: number) => void;
       close: () => void;
       minimize: () => void;
+      onCollapse?: (cb: () => void) => void;
+      onToggleExpand?: (cb: () => void) => void;
     };
     __TAURI__?: any;
     yuiTriggerQuick?: (q: string) => void;
   }
 }
 
-document.addEventListener('DOMContentLoaded', () => {
-  const isDesktop = !!(window.electronAPI || window.__TAURI__ || window.location.search.includes('desktop'));
-  if (isDesktop) {
-    document.documentElement.classList.add('desktop-mode');
-    document.body.classList.add('desktop-mode');
+function initYui() {
+  const appRoot = document.getElementById('app');
+  if (!appRoot) {
+    console.error("No se encontró el elemento #app");
+    return;
   }
 
-  const appRoot = document.getElementById('app');
-  if (!appRoot) return;
-
   // Initialize Dynamic Island
+  console.log("Inicializando YUI Dynamic Island...");
   const island = new DynamicIsland(appRoot);
 
   // Resume AudioContext on first user interaction (browser policy)
@@ -38,12 +38,10 @@ document.addEventListener('DOMContentLoaded', () => {
   };
   window.addEventListener('click', resumeAudio, { once: true });
   window.addEventListener('keydown', resumeAudio, { once: true });
+}
 
-  // Keyboard shortcut: Cmd/Ctrl + K or Alt + Space to expand/collapse Notch
-  window.addEventListener('keydown', (e) => {
-    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
-      e.preventDefault();
-      island.setMode(island.mode === 'expanded' ? 'pill' : 'expanded');
-    }
-  });
-});
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', initYui);
+} else {
+  initYui();
+}

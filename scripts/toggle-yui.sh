@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# YUI Companion Toggle Script (Sway / Wayland)
+# YUI Companion Toggle Script (Hyprland & Sway / Wayland)
 # Supports:
-#   toggle-yui.sh          -> Toggle visibility (Show / Hide via scratchpad)
+#   toggle-yui.sh          -> Toggle visibility / Expand
 #   toggle-yui.sh --expand -> Toggle Expanded / Pill state via SIGUSR1 IPC
 # ==============================================================================
 set -e
@@ -29,14 +29,17 @@ if [ -z "$YUI_PID" ]; then
   exit 0
 fi
 
-# Toggle visibility in Sway
-if command -v swaymsg >/dev/null 2>&1; then
-  IS_VISIBLE=$(swaymsg -t get_tree 2>/dev/null | jq -r '.. | select(.app_id? == "yui-companion") | .visible' 2>/dev/null | head -n 1)
+# If already running, handle toggle according to compositor
+if [ -n "$HYPRLAND_INSTANCE_SIGNATURE" ]; then
+  # In Hyprland: toggle expand/pill state directly
+  kill -SIGUSR1 "$YUI_PID" 2>/dev/null || true
+elif command -v swaymsg >/dev/null 2>&1 && [ -n "$SWAYSOCK" ]; then
+  IS_VISIBLE=$(swaymsg -t get_tree 2>/dev/null | jq -r '.. | select(.app_id? == "yui-companion") | .visible' 2>/dev/null | head -n 1 || true)
   if [ "$IS_VISIBLE" = "true" ]; then
     swaymsg '[app_id="yui-companion"] move scratchpad' >/dev/null 2>&1 || true
   else
     swaymsg '[app_id="yui-companion"] scratchpad show, sticky enable, focus' >/dev/null 2>&1 || true
   fi
 else
-  kill "$YUI_PID" 2>/dev/null || true
+  kill -SIGUSR1 "$YUI_PID" 2>/dev/null || true
 fi
