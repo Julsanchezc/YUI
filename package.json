@@ -12,12 +12,20 @@
     "desktop:linux": "electron42 electron/main.cjs",
     "build:linux": "node scripts/build-linux.cjs",
     "tauri": "tauri",
-    "build:windows": "node scripts/build-windows.cjs"
+    "build:windows": "node scripts/build-windows.cjs",
+    "cap:sync": "vite build && npx cap sync android",
+    "cap:open": "npx cap open android",
+    "build:android": "vite build && npx cap sync android && cd android && ./gradlew assembleDebug"
   },
   "devDependencies": {
     "@electron/asar": "^4.3.1",
     "@tauri-apps/cli": "^2.12.1",
     "typescript": "^5.4.5",
     "vite": "^5.2.11"
+  },
+  "dependencies": {
+    "@capacitor/android": "^8.5.2",
+    "@capacitor/cli": "^8.5.2",
+    "@capacitor/core": "^8.5.2"
   }
 }

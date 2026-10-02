@@ -89,7 +89,7 @@ export class DynamicIsland {
       <div id="islandContainer" class="fixed top-0 left-0 right-0 flex justify-center z-50 pointer-events-none select-none">
         
         <!-- The Floating Notch / Dynamic Island -->
-        <div id="islandNotch" class="pointer-events-auto yui-notch-acrylic w-[380px] h-[42px] px-3 flex flex-col items-center bg-slate-950/90 backdrop-blur-xl transition-all duration-300 ease-out overflow-hidden shadow-2xl">
+        <div id="islandNotch" class="pointer-events-auto yui-notch-acrylic w-[360px] max-w-[96vw] h-[42px] px-3 flex flex-col items-center bg-slate-950/90 backdrop-blur-xl transition-all duration-300 ease-out overflow-hidden shadow-2xl">
           
           <!-- Compact Island Bar (Always accessible, height adjusted per mode) -->
           <div id="notchHeader" class="w-full flex items-center justify-between h-[42px] gap-2 cursor-pointer transition flex-shrink-0">
@@ -529,10 +529,13 @@ export class DynamicIsland {
     const toggleBtn = this.toggleBtn;
 
     // Reset size classes
-    notch.classList.remove('w-[380px]', 'h-[42px]', 'w-[480px]', 'h-[56px]', 'w-[640px]', 'h-[500px]');
+    notch.classList.remove(
+      'w-[380px]', 'h-[42px]', 'w-[480px]', 'h-[56px]', 'w-[640px]', 'h-[500px]',
+      'w-[95vw]', 'max-w-[640px]', 'h-[85vh]', 'max-h-[520px]', 'w-[92vw]', 'max-w-[480px]', 'w-[360px]', 'max-w-[96vw]'
+    );
 
     if (mode === 'expanded') {
-      notch.classList.add('w-[640px]', 'h-[500px]');
+      notch.classList.add('w-[95vw]', 'max-w-[640px]', 'h-[85vh]', 'max-h-[520px]');
       expandPanel.classList.remove('hidden');
       expandPanel.classList.add('flex');
       collapseBtn.classList.remove('hidden');
@@ -542,7 +545,7 @@ export class DynamicIsland {
       // Focus input field in expanded mode
       setTimeout(() => this.textInput.focus(), 150);
     } else if (mode === 'compact') {
-      notch.classList.add('w-[480px]', 'h-[56px]');
+      notch.classList.add('w-[92vw]', 'max-w-[480px]', 'h-[56px]');
       expandPanel.classList.add('hidden');
       expandPanel.classList.remove('flex');
       collapseBtn.classList.add('hidden');
@@ -550,7 +553,7 @@ export class DynamicIsland {
       toggleBtn.classList.remove('hidden');
       if (expandIcon) expandIcon.classList.remove('rotate-180');
     } else { // pill
-      notch.classList.add('w-[380px]', 'h-[42px]');
+      notch.classList.add('w-[360px]', 'max-w-[96vw]', 'h-[42px]');
       expandPanel.classList.add('hidden');
       expandPanel.classList.remove('flex');
       collapseBtn.classList.add('hidden');
