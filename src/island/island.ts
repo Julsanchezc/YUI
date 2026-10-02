@@ -646,60 +646,101 @@ export class DynamicIsland {
     this.statusText.textContent = "Pensando...";
     this.thinkingContainer.classList.remove('hidden');
     (this.thinkingContainer as HTMLDetailsElement).open = true;
-    this.thinkingContent.innerHTML = '<span class="text-purple-300">Analizando intención y herramientas...</span>';
+    this.thinkingContent.innerHTML = '<span class="text-purple-300">Iniciando ciclo agéntico...</span>';
 
     try {
-      const response = await callGemini(this.conversation, (thought) => {
-        this.thinkingContent.textContent = thought;
-      });
+      const maxSteps = 4;
+      let lastToolResult: any = null;
+      let lastAgentText: string = "";
 
-      // Check for tool calls
-      if (response.toolCalls && response.toolCalls.length > 0) {
-        for (const tc of response.toolCalls) {
-          const stepDiv = document.createElement('div');
-          stepDiv.className = 'text-cyan-300 text-[11px] font-mono py-1 border-l-2 border-cyan-400 pl-2 my-1';
-          stepDiv.textContent = `⚡ Herramienta: ${tc.name}`;
-          this.thinkingContent.appendChild(stepDiv);
+      for (let step = 0; step < maxSteps; step++) {
+        const response = await callGemini(this.conversation, (thought) => {
+          this.thinkingContent.textContent = thought;
+        });
 
-          const execRes = await toolRegistry.executeTool(tc.name, tc.args, false);
+        lastAgentText = response.text || "";
 
-          if (execRes.needsApproval && execRes.approvalPayload) {
-            // Human in the Loop approval needed
-            this.companion.setState('approval');
-            this.statusText.textContent = "Esperando aprobación...";
+        // Check for tool calls
+        if (response.toolCalls && response.toolCalls.length > 0) {
+          const toolObservations: string[] = [];
 
-            await new Promise<void>((resolve) => {
-              this.approvalManager.show({
-                actionTitle: execRes.approvalPayload!.actionTitle,
-                command: execRes.approvalPayload!.command,
-                reason: execRes.approvalPayload!.reason,
-                onApprove: async () => {
-                  Sound.play('approve');
-                  const approvedRes = await toolRegistry.executeTool(tc.name, tc.args, true);
-                  await this.completeToolExecutionTurn(tc, approvedRes.result);
-                  resolve();
-                },
-                onDeny: () => {
-                  Sound.play('annoyed');
-                  this.companion.triggerEmote('annoyed');
-                  this.finalizeTurn("Acción cancelada por el usuario.");
-                  resolve();
-                }
-              });
-            });
-            return;
-          } else {
-            // Auto tool executed
+          for (const tc of response.toolCalls) {
+            const stepDiv = document.createElement('div');
+            stepDiv.className = 'text-cyan-300 text-[11px] font-mono py-1 border-l-2 border-cyan-400 pl-2 my-1';
+            stepDiv.textContent = `⚡ [Paso ${step + 1}] Herramienta: ${tc.name}`;
+            this.thinkingContent.appendChild(stepDiv);
+
             if (tc.name === 'set_companion_emote') {
               this.companion.triggerEmote(tc.args.emote || 'happy');
             }
-            await this.completeToolExecutionTurn(tc, execRes.result);
-            return;
+
+            let execRes = await toolRegistry.executeTool(tc.name, tc.args, false);
+
+            if (execRes.needsApproval && execRes.approvalPayload) {
+              // Human in the Loop approval
+              this.companion.setState('approval');
+              this.statusText.textContent = "Esperando aprobación...";
+
+              const approved = await new Promise<boolean>((resolve) => {
+                this.approvalManager.show({
+                  actionTitle: execRes.approvalPayload!.actionTitle,
+                  command: execRes.approvalPayload!.command,
+                  reason: execRes.approvalPayload!.reason,
+                  onApprove: () => {
+                    Sound.play('approve');
+                    resolve(true);
+                  },
+                  onDeny: () => {
+                    Sound.play('annoyed');
+                    this.companion.triggerEmote('annoyed');
+                    resolve(false);
+                  }
+                });
+              });
+
+              if (approved) {
+                execRes = await toolRegistry.executeTool(tc.name, tc.args, true);
+              } else {
+                execRes = {
+                  toolName: tc.name,
+                  result: { error: "Acción cancelada por el usuario." }
+                };
+              }
+            }
+
+            lastToolResult = execRes.result;
+
+            // Direct completion for OpenCode subagent
+            if (tc.name === 'delegate_to_opencode') {
+              this.finalizeTurn("OpenCode completó la tarea.", execRes.result);
+              return;
+            }
+
+            const obsText = `[Resultado de ${tc.name}]: ${JSON.stringify(execRes.result)}`;
+            toolObservations.push(obsText);
           }
+
+          // Feed back observation to Gemini for subsequent reasoning
+          this.conversation.push({
+            role: 'model',
+            parts: [{ text: response.text ? response.text : `Ejecutando acción...` }]
+          });
+          this.conversation.push({
+            role: 'user',
+            parts: [{ text: `${toolObservations.join('\n')}\nAnaliza el resultado obtenido y responde al usuario de forma clara, concisa y amigable, o continúa si se requieren pasos adicionales.` }]
+          });
+
+          this.companion.setState('thinking');
+          this.statusText.textContent = `Procesando paso ${step + 2}...`;
+
+        } else {
+          // No tools called, Gemini gave the final response
+          this.finalizeTurn(response.text || "¡Listo!", lastToolResult);
+          return;
         }
       }
 
-      this.finalizeTurn(response.text || "¡Listo!");
+      this.finalizeTurn(lastAgentText || "Acciones completadas.", lastToolResult);
 
     } catch (err: any) {
       console.error(err);
@@ -710,37 +751,6 @@ export class DynamicIsland {
     } finally {
       this.isProcessing = false;
     }
-  }
-
-  private completeToolExecutionTurn(tc: { name: string; args: any }, result: any) {
-    if (tc.name === 'delegate_to_opencode') {
-      this.finalizeTurn("OpenCode completó la tarea.", result);
-      return;
-    }
-
-    const naturalReply = this.formatFallbackToolResult(tc.name, result);
-    this.finalizeTurn(naturalReply, tc.name === 'get_system_status' || tc.name === 'get_weather' ? result : undefined);
-  }
-
-  private formatFallbackToolResult(toolName: string, result: any): string {
-    if (toolName === 'set_companion_emote') {
-      const em = result?.emoteDisplayed || 'feliz';
-      return `¡He cambiado mi expresión a **${em}**! ✨`;
-    }
-    if (toolName === 'get_system_status') {
-      const cpu = result?.cpuUsage || '12%';
-      const ram = result?.ramAvailable || '8 GB';
-      return `Tu sistema se encuentra en buen estado: uso de CPU en **${cpu}** y dispones de **${ram} de RAM libre**.`;
-    }
-    if (toolName === 'get_weather') {
-      const temp = result?.temperature || '20°C';
-      const cond = result?.condition || 'despejado';
-      return `El clima actual reporta **${temp}** con cielo **${cond}**.`;
-    }
-    if (toolName === 'inspect_dropped_file') {
-      return `He inspeccionado el archivo correctamente.`;
-    }
-    return `Acción realizada con éxito.`;
   }
 
   private finalizeTurn(agentText: string, toolResult?: any) {
@@ -785,11 +795,44 @@ export class DynamicIsland {
 
         const summaryText = opencodeText ? opencodeText.replace(/```[\s\S]*?```/g, 'código generado.').slice(0, 140) : 'La tarea de OpenCode se ha completado.';
         spokenSummary = `OpenCode ha terminado la tarea. ${summaryText}`;
+
+      } else if (toolResult.command !== undefined && (toolResult.stdout !== undefined || toolResult.stderr !== undefined)) {
+        // Shell command result
+        const isSuccess = toolResult.exitCode === 0 || toolResult.success;
+        const exitBadge = isSuccess 
+          ? '<span class="text-emerald-400 font-mono text-[9px] bg-emerald-950/80 px-1.5 py-0.5 rounded">exit 0</span>' 
+          : `<span class="text-rose-400 font-mono text-[9px] bg-rose-950/80 px-1.5 py-0.5 rounded">exit ${toolResult.exitCode}</span>`;
+        const rawOutput = (toolResult.stdout || toolResult.stderr || '(sin salida)').trim();
+        const output = rawOutput.length > 300 ? rawOutput.slice(0, 300) + '...' : rawOutput;
+        displayText += `
+          <div class="mt-2 p-2 bg-slate-950/80 border border-slate-800 rounded-xl font-mono text-xs shadow-sm">
+            <div class="flex items-center justify-between text-slate-400 text-[10px] pb-1 border-b border-slate-800">
+              <span class="text-cyan-300 truncate max-w-[200px]">$ ${toolResult.command}</span>
+              ${exitBadge}
+            </div>
+            <pre class="mt-1 text-slate-300 text-[11px] overflow-x-auto whitespace-pre-wrap max-h-28">${output}</pre>
+          </div>
+        `;
+      } else if (toolResult.app !== undefined && toolResult.success) {
+        // App launched
+        displayText += `
+          <div class="mt-2 p-2 bg-slate-950/80 border border-cyan-800/50 rounded-xl flex items-center gap-2 text-xs font-mono text-cyan-300">
+            <span>🚀</span>
+            <span>Aplicación lanzada: <strong>${toolResult.app}</strong></span>
+          </div>
+        `;
+      } else if (toolResult.path && typeof toolResult.path === 'string' && toolResult.path.includes('.png')) {
+        // Screenshot captured
+        displayText += `
+          <div class="mt-2 p-2 bg-slate-950/80 border border-emerald-800/50 rounded-xl flex items-center justify-between text-xs font-mono text-emerald-300">
+            <span>📸 Captura tomada: ${toolResult.path}</span>
+          </div>
+        `;
       } else if (toolResult.cpuUsage !== undefined || toolResult.ramAvailable !== undefined) {
         const cpu = toolResult.cpuUsage || 'N/A';
         const ram = toolResult.ramAvailable || 'N/A';
         const host = toolResult.hostname || 'Linux';
-        const uptime = toolResult.uptimeHours ? `${toolResult.uptimeHours}h` : '';
+        const uptime = toolResult.uptime || '';
 
         displayText += `
           <div class="mt-2 p-2.5 bg-slate-950/60 border border-slate-700/50 rounded-xl grid grid-cols-2 gap-2 text-xs font-mono shadow-sm">

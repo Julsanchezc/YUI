@@ -99,12 +99,14 @@ export class OpenCodeClient {
     return [];
   }
 
-  /**
-   * Executes an agentic coding task through OpenCode.
-   * Tries WebSocket streaming first, with automatic fallback to HTTP SSE.
-   */
   public async runTask(options: OpenCodeTaskOptions): Promise<OpenCodeTaskResult> {
     const effectiveSessionId = options.sessionId || this.currentSessionId || undefined;
+
+    // 1. Direct native execution in Electron desktop
+    const api = typeof window !== 'undefined' ? (window as any).electronAPI : null;
+    if (api?.runOpenCode) {
+      return this.runTaskElectron(options);
+    }
 
     try {
       return await this.runTaskWebSocket({
@@ -118,6 +120,52 @@ export class OpenCodeClient {
         sessionId: effectiveSessionId
       });
     }
+  }
+
+  private async runTaskElectron(options: OpenCodeTaskOptions): Promise<OpenCodeTaskResult> {
+    const api = (window as any).electronAPI;
+    this.notifyProgress('OpenCode: Iniciando...', 'Lanzando agente de desarrollo local');
+
+    const toolsUsed: OpenCodeToolCall[] = [];
+    const textParts: string[] = [];
+
+    if (api.onOpenCodeStream) {
+      api.onOpenCodeStream((event: any) => {
+        if (!event) return;
+        if (event.type === 'step_start') {
+          this.notifyProgress('OpenCode: Pensando...', event.title || 'Planificando solución...');
+        } else if (event.type === 'reasoning') {
+          const thought = event.part?.text || event.text || '';
+          if (thought) {
+            this.notifyThought(thought);
+            if (options.onThought) options.onThought(thought);
+          }
+        } else if (event.type === 'tool_use') {
+          const tName = event.part?.tool || event.tool || 'tool';
+          const input = event.part?.state?.input || event.input;
+          toolsUsed.push({ tool: tName, input });
+          this.notifyProgress('OpenCode: Ejecutando...', `Herramienta: ${tName}`);
+        } else if (event.type === 'text') {
+          const chunk = event.part?.text || event.text || '';
+          textParts.push(chunk);
+        }
+      });
+    }
+
+    const res = await api.runOpenCode({ prompt: options.prompt, file: options.file });
+    let finalText = res.output || '';
+    if (textParts.length > 0 && (!finalText || finalText.startsWith('{'))) {
+      finalText = textParts.join('');
+    }
+
+    this.notifyProgress('OpenCode: Finalizado ✓', 'Tarea de codificación terminada');
+
+    return {
+      success: res.success,
+      text: finalText || (res.success ? "Tarea completada con éxito por OpenCode." : `Error: ${res.error}`),
+      toolsUsed,
+      exitCode: res.exitCode
+    };
   }
 
   /**

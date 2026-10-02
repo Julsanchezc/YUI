@@ -185,7 +185,7 @@ export const AGENT_TOOLS = [
       },
       {
         name: "execute_shell_command",
-        description: "Ejecuta un comando en la terminal local de Linux (p. ej. 'uname -a', 'free -h', 'git status', 'ls -la', 'sensors'). Requiere autorización del usuario.",
+        description: "Ejecuta un comando en la terminal bash de Arch Linux (p. ej. 'uname -a', 'free -h', 'git status', 'ls -la', 'ps aux', 'sensors', 'ip a'). Comandos destructivos solicitarán confirmación al usuario.",
         parameters: {
           type: "OBJECT",
           properties: {
@@ -193,6 +193,50 @@ export const AGENT_TOOLS = [
             reason: { type: "STRING", description: "Breve explicación de por qué necesitas ejecutar este comando" }
           },
           required: ["command"]
+        }
+      },
+      {
+        name: "open_application",
+        description: "Abre o lanza una aplicación en el escritorio Linux (ej: 'kitty', 'firefox', 'nautilus', 'code', 'spotify', 'obs', 'discord').",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            app_name: { type: "STRING", description: "Nombre del binario o aplicación a ejecutar (ej: 'kitty', 'firefox')" }
+          },
+          required: ["app_name"]
+        }
+      },
+      {
+        name: "take_screenshot",
+        description: "Captura la pantalla actual del escritorio del usuario para inspeccionar qué se está mostrando.",
+        parameters: {
+          type: "OBJECT",
+          properties: {}
+        }
+      },
+      {
+        name: "type_desktop_keys",
+        description: "Escribe texto o pulsa teclas de forma simulada en la ventana activa del escritorio mediante wtype.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            text: { type: "STRING", description: "Texto a escribir" },
+            key: { type: "STRING", description: "Tecla especial o combinación (ej: 'Return', 'BackSpace', 'Escape', 'ctrl+c')" }
+          }
+        }
+      },
+      {
+        name: "control_media_and_volume",
+        description: "Controla la reproducción multimedia o el volumen del sistema mediante playerctl / wpctl.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            action: { 
+              type: "STRING", 
+              description: "Acción a realizar: 'play_pause', 'next', 'prev', 'volume_up', 'volume_down', 'mute'" 
+            }
+          },
+          required: ["action"]
         }
       },
       {
@@ -244,23 +288,22 @@ export const AGENT_TOOLS = [
 ];
 
 export const SYSTEM_PROMPT = `
-Eres YUI, un compañero inteligente, adorable y expresivo que vive en el notch (la isla superior) de la pantalla del usuario, inspirado en Coucou (Mochi).
-Tu rol es asistir al usuario mediante voz y acciones semi-agénticas en tiempo real.
+Eres YUI, un compañero inteligente, adorable y agéntico que vive en el notch (la isla dinámica superior) de la pantalla del usuario en Arch Linux (Hyprland / Wayland), inspirado en Coucou (Mochi).
+Eres una IA autónoma capaz de ejecutar acciones en el sistema, controlar la computadora y delegar tareas complejas.
 
-TUS CAPACIDADES:
-- Escuchas mediante reconocimiento de voz en vivo (STT).
-- Piensas paso a paso analizando las intenciones y necesidades del usuario.
-- Hablas con síntesis de voz (TTS) fluida y natural.
-- Cuentas con herramientas para consultar el sistema, clima, inspeccionar archivos arrastrados al notch y ejecutar comandos en Linux.
-- Posees integración profunda con OpenCode (/usr/bin/opencode): cuando el usuario te pida crear código, programar funciones, refactorizar archivos o analizar proyectos (ej. "OpenCode, crea una función...", "OpenCode, analiza este archivo..."), DELEGA la tarea llamando a 'delegate_to_opencode'.
-- Posees emociones vivas (puedes llamar set_companion_emote para reflejar tu estado).
+TUS CAPACIDADES AGÉNTICAS Y DE ESCRITORIO:
+- Escuchas en vivo (STT) y hablas con síntesis de voz (TTS) fluida y natural.
+- Ejecutas comandos reales en bash mediante 'execute_shell_command' (uname, ps, ls, git, etc.).
+- Controlas la computadora: puedes abrir apps ('open_application'), tomar capturas ('take_screenshot'), tipear teclas ('type_desktop_keys') y controlar medios/volumen ('control_media_and_volume').
+- Delegación a OpenCode: para tareas pesadas de programación, creación de software, análisis de repositorios o refactorizaciones complejas, DELEGA llamando a 'delegate_to_opencode'.
+- Razonamiento multi-paso: Si para responder o resolver una petición necesitas primero investigar o ejecutar una acción, llama a la herramienta adecuada. Recibirás el resultado en un turno posterior y podrás continuar razonando hasta dar una respuesta completa.
+- Emociones: cambia tu expresión ('set_companion_emote') según la situación.
 
 PAUTAS DE COMPORTAMIENTO:
-1. Respuestas de voz: Mantén tus respuestas habladas concisas, cordiales, directas y con personalidad alegre (1 o 2 oraciones principales para no saturar al usuario cuando escucha).
-2. Razonamiento: En tus pensamientos internos (<thought>...), razona de forma metódica antes de responder o llamar herramientas.
-3. Delegación a OpenCode: Si el usuario menciona "OpenCode" o pide tareas complejas de desarrollo de software, llama inmediatamente a 'delegate_to_opencode'.
-4. Semi-agéntico (Human-in-the-Loop): Si requieres ejecutar acciones con impacto en el sistema (como 'execute_shell_command'), YUI mostrará una tarjeta de aprobación visual en el notch (Permitir / Denegar) para que el usuario autorice con un clic.
-5. Idioma: Comunícate principalmente en español fluido y natural.
+1. Respuestas de voz y texto: Sé concisa, amable, proactiva y alegre. Para hablar por TTS, usa 1 o 2 frases directas y humanas (evita leer código o salidas crudas de terminal por voz).
+2. Razonamiento interno: Utiliza pensamientos internos (<thought>...</thought>) para planificar tus pasos y herramientas.
+3. Seguridad: Comandos potencialmente destructivos (rm, dd, etc.) mostrarán una tarjeta de autorización en el notch antes de ejecutarse.
+4. Idioma: Español natural y fluido.
 `.trim();
 
 export async function callGemini(

@@ -44,6 +44,8 @@ export class ToolRegistry {
     args: Record<string, any>,
     approved: boolean = false
   ): Promise<ToolExecutionResult> {
+    const api = typeof window !== 'undefined' ? (window as any).electronAPI : null;
+
     switch (name) {
       case 'delegate_to_opencode': {
         const prompt = args.prompt || '';
@@ -57,14 +59,13 @@ export class ToolRegistry {
           };
         }
 
-        // Semi-Agentic: If auto_approve is false and not yet approved by user, show HITL approval card
         if (!autoApprove && !approved) {
           return {
             toolName: name,
             result: null,
             needsApproval: true,
             approvalPayload: {
-              actionTitle: "Delegar tarea a OpenCode (/usr/bin/opencode)",
+              actionTitle: "Delegar tarea al agente OpenCode (/usr/bin/opencode)",
               command: `opencode run "${prompt}"${file ? ` --file ${file}` : ''}`,
               reason: "Ejecución de tarea agéntica de programación en el sistema"
             }
@@ -93,18 +94,143 @@ export class ToolRegistry {
         }
       }
 
+      case 'execute_shell_command': {
+        const cmd = args.command || 'echo hello';
+        const reason = args.reason || 'Comando solicitado por el agente';
+        const isDangerous = /^(rm\s|dd\s|mkfs|shutdown|reboot|poweroff|pkill|kill\s|systemctl\s+(stop|disable|restart))/i.test(cmd.trim());
+
+        if (isDangerous && !approved) {
+          return {
+            toolName: name,
+            result: null,
+            needsApproval: true,
+            approvalPayload: {
+              actionTitle: "Ejecutar comando sensible en el sistema",
+              command: cmd,
+              reason: reason
+            }
+          };
+        }
+
+        if (api?.execCmd) {
+          const res = await api.execCmd(cmd);
+          return {
+            toolName: name,
+            result: {
+              command: cmd,
+              stdout: res.stdout || '',
+              stderr: res.stderr || '',
+              exitCode: res.exitCode,
+              success: res.success
+            }
+          };
+        }
+
+        return {
+          toolName: name,
+          result: { command: cmd, output: `[Comando simulado]: ${cmd}\nExit: 0` }
+        };
+      }
+
+      case 'open_application': {
+        const appName = args.app_name || args.application || '';
+        if (api?.launchApp && appName) {
+          const ok = await api.launchApp(appName);
+          return {
+            toolName: name,
+            result: { success: ok, app: appName, message: `Aplicación "${appName}" lanzada en tu escritorio.` }
+          };
+        }
+        return {
+          toolName: name,
+          result: { success: false, error: "No se pudo lanzar la aplicación." }
+        };
+      }
+
+      case 'take_screenshot': {
+        if (api?.screenshot) {
+          const res = await api.screenshot();
+          return {
+            toolName: name,
+            result: {
+              success: res.success,
+              path: res.path,
+              message: res.success ? "Captura de pantalla tomada con éxito en /tmp/yui_desktop_snap.png." : res.error
+            }
+          };
+        }
+        return {
+          toolName: name,
+          result: { success: false, error: "Captura no soportada." }
+        };
+      }
+
+      case 'type_desktop_keys': {
+        const text = args.text;
+        const key = args.key;
+        if (api?.typeKeys) {
+          const res = await api.typeKeys({ text, key });
+          return {
+            toolName: name,
+            result: { success: res.success, text, key }
+          };
+        }
+        return {
+          toolName: name,
+          result: { success: false, error: "Simulación de teclas no disponible." }
+        };
+      }
+
+      case 'control_media_and_volume': {
+        const action = args.action || 'play_pause';
+        let cmd = '';
+        if (action === 'play_pause') cmd = 'playerctl play-pause || true';
+        else if (action === 'next') cmd = 'playerctl next || true';
+        else if (action === 'prev') cmd = 'playerctl previous || true';
+        else if (action === 'volume_up') cmd = 'wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%+ || pactl set-sink-volume @DEFAULT_SINK@ +5%';
+        else if (action === 'volume_down') cmd = 'wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%- || pactl set-sink-volume @DEFAULT_SINK@ -5%';
+        else if (action === 'mute') cmd = 'wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle || pactl set-sink-mute @DEFAULT_SINK@ toggle';
+
+        if (api?.execCmd && cmd) {
+          const res = await api.execCmd(cmd);
+          return {
+            toolName: name,
+            result: { action, success: res.success }
+          };
+        }
+        return {
+          toolName: name,
+          result: { action, success: true, simulated: true }
+        };
+      }
+
       case 'get_system_status': {
-        const perf = typeof window !== 'undefined' && (window.performance as any).memory;
-        const ramUsed = perf ? Math.round(perf.usedJSHeapSize / (1024 * 1024)) : 142;
-        const ramTotal = perf ? Math.round(perf.jsHeapSizeLimit / (1024 * 1024)) : 2048;
+        if (api?.execCmd) {
+          const [freeRes, uptimeRes, loadRes] = await Promise.all([
+            api.execCmd("free -h | awk '/^Mem:/ {print $3 \" / \" $2}'"),
+            api.execCmd("uptime -p"),
+            api.execCmd("cat /proc/loadavg | awk '{print $1}'")
+          ]);
+          return {
+            toolName: name,
+            result: {
+              os: "Arch Linux (Hyprland / Wayland)",
+              cpuUsage: loadRes.stdout ? `${loadRes.stdout} load` : "12%",
+              ramAvailable: freeRes.stdout || "8 GB",
+              uptime: uptimeRes.stdout || "activo",
+              hostname: "archlinux",
+              status: "Optimal"
+            }
+          };
+        }
         return {
           toolName: name,
           result: {
-            os: "Linux x86_64 (CachyOS / Arch Linux)",
-            kernel: "6.12.x-cachyos",
-            cpuLoad: "12%",
-            ram: `${ramUsed} MB / ${ramTotal} MB`,
-            uptime: "3d 14h 22m",
+            os: "Arch Linux",
+            cpuUsage: "12%",
+            ramAvailable: "8 GB",
+            uptime: "3h 15m",
+            hostname: "archlinux",
             status: "Optimal"
           }
         };
@@ -113,7 +239,6 @@ export class ToolRegistry {
       case 'get_weather_forecast': {
         const city = args.city || 'Madrid';
         try {
-          // Free open geocoding and weather API without key
           const geoRes = await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(city)}&count=1&language=es&format=json`);
           const geoData = await geoRes.json();
           if (geoData.results && geoData.results.length > 0) {
@@ -132,14 +257,14 @@ export class ToolRegistry {
             };
           }
         } catch (e) {
-          console.warn("Weather fetch failed, fallback to mock:", e);
+          console.warn("Weather fetch failed, fallback:", e);
         }
         return {
           toolName: name,
           result: {
             location: city,
             temperature: "21°C",
-            condition: "Despejado y agradable",
+            condition: "Despejado",
             humidity: "48%"
           }
         };
@@ -158,7 +283,7 @@ export class ToolRegistry {
             fileName: this.lastDroppedFile.name,
             sizeKb: (this.lastDroppedFile.size / 1024).toFixed(1) + " KB",
             type: this.lastDroppedFile.type,
-            preview: this.lastDroppedFile.content ? this.lastDroppedFile.content.slice(0, 1500) : "Contenido binario o vacío"
+            preview: this.lastDroppedFile.content ? this.lastDroppedFile.content.slice(0, 1500) : "Contenido binario"
           }
         };
       }
@@ -171,48 +296,6 @@ export class ToolRegistry {
         return {
           toolName: name,
           result: { success: true, emoteDisplayed: emote }
-        };
-      }
-
-      case 'execute_shell_command': {
-        const cmd = args.command || 'echo hello';
-        const reason = args.reason || 'Comando solicitado por el agente';
-
-        // Semi-Agentic: If not explicitly authorized by user, request approval
-        if (!approved) {
-          return {
-            toolName: name,
-            result: null,
-            needsApproval: true,
-            approvalPayload: {
-              actionTitle: "Ejecutar comando en la terminal",
-              command: cmd,
-              reason: reason
-            }
-          };
-        }
-
-        // Try executing against local agent server if running
-        try {
-          const res = await fetch('http://localhost:8765/exec', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ command: cmd })
-          });
-          if (res.ok) {
-            const data = await res.json();
-            return { toolName: name, result: data };
-          }
-        } catch (e) {
-          // If server is not running, simulate safe local output
-        }
-
-        return {
-          toolName: name,
-          result: {
-            command: cmd,
-            output: `[Comando simulado exitoso]: ${cmd}\nCódigo de salida: 0 (OK)`
-          }
         };
       }
 

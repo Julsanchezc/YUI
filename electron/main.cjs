@@ -1,7 +1,7 @@
 const { app, BrowserWindow, screen, ipcMain } = require('electron');
 const path = require('path');
 const fs = require('fs');
-const { exec } = require('child_process');
+const { exec, spawn } = require('child_process');
 
 // Set application identity
 app.setName('yui-companion');
@@ -193,6 +193,111 @@ function createWindow() {
         mainWindow.minimize();
       }
     }
+  });
+
+  // Desktop Agent Capabilities (Terminal, Screenshot, Keyboard, Apps, OpenCode)
+  ipcMain.handle('yui:exec-cmd', async (event, cmd) => {
+    return new Promise((resolve) => {
+      exec(cmd, { cwd: process.env.HOME || '/home/niko', timeout: 30000, maxBuffer: 10 * 1024 * 1024 }, (err, stdout, stderr) => {
+        resolve({
+          success: !err,
+          stdout: stdout ? stdout.trim() : '',
+          stderr: stderr ? stderr.trim() : '',
+          exitCode: err ? (err.code || 1) : 0
+        });
+      });
+    });
+  });
+
+  ipcMain.handle('yui:screenshot', async () => {
+    return new Promise((resolve) => {
+      const outPath = '/tmp/yui_desktop_snap.png';
+      exec(`grim ${outPath}`, (err) => {
+        if (err) return resolve({ success: false, error: err.message });
+        try {
+          const data = fs.readFileSync(outPath);
+          const base64 = data.toString('base64');
+          resolve({ success: true, path: outPath, base64 });
+        } catch (e) {
+          resolve({ success: false, error: e.message });
+        }
+      });
+    });
+  });
+
+  ipcMain.handle('yui:type-keys', async (event, { text, key }) => {
+    return new Promise((resolve) => {
+      let command = '';
+      if (text) {
+        command = `wtype "${text.replace(/"/g, '\\"')}"`;
+      } else if (key) {
+        command = `wtype -k ${key}`;
+      }
+      if (!command) return resolve({ success: false });
+      exec(command, (err) => {
+        resolve({ success: !err });
+      });
+    });
+  });
+
+  ipcMain.handle('yui:launch-app', async (event, appName) => {
+    return new Promise((resolve) => {
+      exec(`nohup ${appName} </dev/null >/dev/null 2>&1 & disown`, (err) => {
+        resolve({ success: !err });
+      });
+    });
+  });
+
+  ipcMain.handle('yui:run-opencode', async (event, { prompt, file }) => {
+    return new Promise((resolve) => {
+      const args = ['run', '--format', 'json', '--auto'];
+      if (file) args.push('--file', file);
+      args.push(prompt);
+
+      const opencodeProc = spawn('/usr/bin/opencode', args, {
+        cwd: process.env.HOME || '/home/niko',
+        env: { ...process.env, PATH: (process.env.PATH || '') + ':/usr/local/bin:/usr/bin' }
+      });
+
+      let stdoutData = '';
+      let stderrData = '';
+
+      opencodeProc.stdout.on('data', (data) => {
+        const text = data.toString();
+        stdoutData += text;
+        const lines = text.split('\n');
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          try {
+            const parsed = JSON.parse(line.trim());
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.webContents.send('yui:opencode-stream', parsed);
+            }
+          } catch (e) {}
+        }
+      });
+
+      opencodeProc.stderr.on('data', (data) => {
+        stderrData += data.toString();
+      });
+
+      opencodeProc.on('close', (code) => {
+        resolve({
+          success: code === 0,
+          output: stdoutData,
+          error: stderrData,
+          exitCode: code
+        });
+      });
+
+      opencodeProc.on('error', (err) => {
+        resolve({
+          success: false,
+          error: err.message,
+          exitCode: 1
+        });
+      });
+    });
   });
 
   mainWindow.on('closed', () => {
