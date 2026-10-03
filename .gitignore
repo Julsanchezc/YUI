@@ -4,6 +4,7 @@ dist/
 src-tauri/target/
 bin/*.asar
 *.asar
+*.apk
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
