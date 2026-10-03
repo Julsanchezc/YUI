@@ -187,6 +187,7 @@ export class DynamicIsland {
                 <button onclick="window.yuiTriggerQuick('¿Cuál es el estado del sistema?')" class="hover:text-cyan-300 underline">📊 Sistema</button>
                 <button onclick="window.yuiTriggerQuick('¿Qué clima hace hoy?')" class="hover:text-cyan-300 underline">🌤️ Clima</button>
                 <button onclick="window.yuiTriggerQuick('OpenCode, crea una función en TypeScript para formatear fechas')" class="hover:text-purple-300 text-purple-400 font-bold underline">⚡ OpenCode</button>
+                <button onclick="window.yuiOpenAssistantSettings && window.yuiOpenAssistantSettings()" class="hover:text-amber-300 text-amber-400 font-bold underline" title="Configurar como asistente predeterminado de Android">⭐ Asistente</button>
               </div>
 
               <div class="flex items-center gap-2.5">
@@ -315,6 +316,30 @@ export class DynamicIsland {
     (window as any).yuiTriggerQuick = (q: string) => {
       this.setMode('expanded');
       this.handleUserQuery(q);
+    };
+
+    // System Assistant Invocation (Android Assist / Power Button / Swipe)
+    (window as any).yuiTriggerVoiceAssistant = () => {
+      this.setMode('expanded');
+      Sound.play('open');
+      this.companion.triggerEmote('wink');
+      setTimeout(() => {
+        if (!this.isRecording) {
+          this.startListening();
+        }
+      }, 350);
+    };
+
+    // Open Android Assistant Settings
+    (window as any).yuiOpenAssistantSettings = async () => {
+      try {
+        const { Plugins } = await import('@capacitor/core');
+        if (Plugins && (Plugins as any).YuiAssistant) {
+          await (Plugins as any).YuiAssistant.openAssistantSettings();
+        }
+      } catch (e) {
+        console.warn('No se pudo abrir la configuración del asistente:', e);
+      }
     };
 
     // Tool registry emote callback

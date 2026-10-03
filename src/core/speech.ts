@@ -205,9 +205,8 @@ export class SpeechEngine {
     // Get active key from keyPool
     const { keyPool } = await import('./gemini');
     const key = keyPool.getActiveKey();
-    if (!key.key) return '';
-
-    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent?key=${key.key}`;
+    const modelName = (import.meta as any).env?.VITE_GEMINI_MODEL || 'gemini-2.5-flash-lite';
+    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${key.key}`;
     const res = await fetch(endpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

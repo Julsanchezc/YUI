@@ -343,7 +343,8 @@ export async function callGemini(
       };
     }
 
-    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent?key=${keyEntry.key}`;
+    const modelName = (import.meta as any).env?.VITE_GEMINI_MODEL || 'gemini-2.5-flash-lite';
+    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${keyEntry.key}`;
 
     try {
       const payload = {

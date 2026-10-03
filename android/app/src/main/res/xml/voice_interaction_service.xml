@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<voice-interaction-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:sessionService="com.yui.companion.YuiVoiceInteractionSessionService"
+    android:recognitionService="com.yui.companion.YuiRecognitionService"
+    android:supportsAssist="true"
+    android:supportsLocalInteraction="true" />
