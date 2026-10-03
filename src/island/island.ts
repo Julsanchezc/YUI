@@ -347,7 +347,7 @@ export class DynamicIsland {
     (window as any).kalaConfigurePcUrl = () => {
       const current = openCodeClient.getRemotePcUrl();
       const input = prompt(
-        "Introduce la URL de OpenCode en tu PC (ej: http://100.64.0.1:4096 con Tailscale o http://192.168.1.50:4096).\n\nDeja vacío para usar el motor autónomo Gemini 2.5 Flash Lite en el móvil:",
+        "Introduce la URL de OpenCode en tu PC (ej: http://100.64.0.1:4096 con Tailscale o http://192.168.1.50:4096).\n\nDeja vacío para usar el motor autónomo Gemini 3.5 Flash Lite en el móvil:",
         current
       );
       if (input !== null) {
@@ -356,7 +356,7 @@ export class DynamicIsland {
         if (activeUrl) {
           this.addMessage('model', `💻 **PC OpenCode Vinculada:** Se intentará delegar código a \`${activeUrl}\` con fallback automático a Gemini Flash Lite.`);
         } else {
-          this.addMessage('model', `⚡ **Modo Autónomo:** Generación de código directa con Gemini 2.5 Flash Lite activa.`);
+          this.addMessage('model', `⚡ **Modo Autónomo:** Generación de código directa con Gemini 3.5 Flash Lite activa.`);
         }
       }
     };

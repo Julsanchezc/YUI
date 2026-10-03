@@ -155,13 +155,13 @@ export class OpenCodeClient {
       }
     }
 
-    // 3. Fallback: Gemini 2.5 Flash Lite autonomous coding engine
-    this.notifyProgress('Kala Code: Modo Autónomo', 'PC no conectada. Usando Gemini 2.5 Flash Lite...');
+    // 3. Fallback: Gemini 3.5 Flash Lite autonomous coding engine
+    this.notifyProgress('Kala Code: Modo Autónomo', 'PC no conectada. Usando Gemini 3.5 Flash Lite...');
     return this.runTaskGeminiFallback(options);
   }
 
   public async runTaskGeminiFallback(options: OpenCodeTaskOptions): Promise<OpenCodeTaskResult> {
-    this.notifyProgress('Kala Code: Pensando...', 'Generando código con Gemini 2.5 Flash Lite');
+    this.notifyProgress('Kala Code: Pensando...', 'Generando código con Gemini 3.5 Flash Lite');
     const { keyPool } = await import('./gemini');
     const key = keyPool.getActiveKey();
 
@@ -175,7 +175,8 @@ Razona de forma metódica en bloques <thought>...</thought>.`;
       ? `[Archivo de trabajo: ${options.file}]\n${options.prompt}`
       : options.prompt;
 
-    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${key.key}`;
+    const modelName = (import.meta as any).env?.VITE_GEMINI_MODEL || 'gemini-3.5-flash-lite';
+    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${key.key}`;
     
     try {
       const res = await fetch(endpoint, {
@@ -204,7 +205,7 @@ Razona de forma metódica en bloques <thought>...</thought>.`;
         this.notifyThought(thought);
       }
 
-      this.notifyProgress('Kala Code: Completado ✓', 'Solución generada con Gemini 2.5 Flash Lite');
+      this.notifyProgress('Kala Code: Completado ✓', 'Solución generada con Gemini 3.5 Flash Lite');
 
       return {
         success: true,
