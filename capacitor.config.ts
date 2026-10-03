@@ -2,7 +2,7 @@ import type { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
   appId: 'com.yui.companion',
-  appName: 'YUI',
+  appName: 'Kala',
   webDir: 'dist',
   server: {
     androidScheme: 'https'

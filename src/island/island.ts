@@ -80,7 +80,7 @@ export class DynamicIsland {
     // Greeting on launch
     setTimeout(() => {
       this.companion.greet();
-      this.addMessage('model', '¡Hola! Soy YUI. Estoy en tu notch lista para escuchar, pensar y asistirte con Gemini.');
+      this.addMessage('model', '¡Hola! Soy Kala. Estoy en tu isla lista para escuchar, pensar y asistirte con Gemini.');
     }, 600);
   }
 
@@ -102,7 +102,7 @@ export class DynamicIsland {
               
               <div class="flex flex-col min-w-0">
                 <div class="flex items-center gap-1.5">
-                  <span class="font-bold text-xs tracking-wider text-slate-100 font-mono">YUI</span>
+                  <span class="font-bold text-xs tracking-wider text-slate-100 font-mono">KALA</span>
                   <span id="pillBadge" class="w-1.5 h-1.5 rounded-full bg-cyan-400"></span>
                 </div>
                 <span id="statusText" class="text-[9px] text-slate-400 font-mono truncate max-w-[130px]">En espera</span>
@@ -172,7 +172,7 @@ export class DynamicIsland {
 
             <!-- Input Bar -->
             <div class="flex items-center gap-2 pt-0.5">
-              <input type="text" id="textInput" placeholder="Escribe o habla con YUI... (Ctrl+K para minimizar)"
+              <input type="text" id="textInput" placeholder="Escribe o habla con Kala... (&quot;Oye Kala&quot; o Ctrl+K)"
                      class="flex-1 bg-slate-900/90 border border-slate-700 rounded-xl px-3 py-1.5 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-cyan-500">
               
               <button id="sendBtn" class="bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold px-3 py-1.5 rounded-xl text-xs flex items-center gap-1 transition active:scale-95 shadow-sm">
@@ -186,7 +186,8 @@ export class DynamicIsland {
                 <span>Acciones:</span>
                 <button onclick="window.yuiTriggerQuick('¿Cuál es el estado del sistema?')" class="hover:text-cyan-300 underline">📊 Sistema</button>
                 <button onclick="window.yuiTriggerQuick('¿Qué clima hace hoy?')" class="hover:text-cyan-300 underline">🌤️ Clima</button>
-                <button onclick="window.yuiTriggerQuick('OpenCode, crea una función en TypeScript para formatear fechas')" class="hover:text-purple-300 text-purple-400 font-bold underline">⚡ OpenCode</button>
+                <button onclick="window.yuiTriggerQuick('Kala, crea una función en Python para ordenar un array')" class="hover:text-purple-300 text-purple-400 font-bold underline">⚡ Código</button>
+                <button onclick="window.kalaConfigurePcUrl && window.kalaConfigurePcUrl()" class="hover:text-blue-300 text-blue-400 underline" title="Configurar conexión con tu PC">💻 PC OpenCode</button>
                 <button onclick="window.yuiOpenAssistantSettings && window.yuiOpenAssistantSettings()" class="hover:text-amber-300 text-amber-400 font-bold underline" title="Configurar como asistente predeterminado de Android">⭐ Asistente</button>
               </div>
 
@@ -339,6 +340,24 @@ export class DynamicIsland {
         }
       } catch (e) {
         console.warn('No se pudo abrir la configuración del asistente:', e);
+      }
+    };
+
+    // Configure Remote PC OpenCode URL
+    (window as any).kalaConfigurePcUrl = () => {
+      const current = openCodeClient.getRemotePcUrl();
+      const input = prompt(
+        "Introduce la URL de OpenCode en tu PC (ej: http://100.64.0.1:4096 con Tailscale o http://192.168.1.50:4096).\n\nDeja vacío para usar el motor autónomo Gemini 2.5 Flash Lite en el móvil:",
+        current
+      );
+      if (input !== null) {
+        openCodeClient.setRemotePcUrl(input);
+        const activeUrl = openCodeClient.getRemotePcUrl();
+        if (activeUrl) {
+          this.addMessage('model', `💻 **PC OpenCode Vinculada:** Se intentará delegar código a \`${activeUrl}\` con fallback automático a Gemini Flash Lite.`);
+        } else {
+          this.addMessage('model', `⚡ **Modo Autónomo:** Generación de código directa con Gemini 2.5 Flash Lite activa.`);
+        }
       }
     };
 
@@ -653,7 +672,7 @@ export class DynamicIsland {
     div.innerHTML = `
       <div class="${isUser ? 'bg-cyan-950/80 border-cyan-700/60 text-cyan-100' : 'bg-slate-900/90 border-slate-700/70 text-slate-100'} border rounded-2xl px-3 py-2 max-w-[88%] leading-relaxed shadow-md backdrop-blur-md">
         <div class="font-mono text-[9px] ${isUser ? 'text-cyan-400' : 'text-purple-300'} uppercase font-bold tracking-wider mb-1 flex items-center gap-1">
-          <span>${isUser ? '👤 Tú' : '✨ YUI'}</span>
+          <span>${isUser ? '👤 Tú' : '✨ Kala'}</span>
         </div>
         <div class="break-words text-xs leading-relaxed space-y-1">${this.formatMarkdown(content)}</div>
       </div>

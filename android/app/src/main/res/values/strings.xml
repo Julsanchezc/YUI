@@ -1,7 +1,7 @@
 <?xml version='1.0' encoding='utf-8'?>
 <resources>
-    <string name="app_name">YUI</string>
-    <string name="title_activity_main">YUI</string>
+    <string name="app_name">Kala</string>
+    <string name="title_activity_main">Kala</string>
     <string name="package_name">com.yui.companion</string>
     <string name="custom_url_scheme">com.yui.companion</string>
 </resources>

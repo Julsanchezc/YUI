@@ -59,9 +59,34 @@ export class OpenCodeClient {
     this.wsBaseUrl = `ws://${host}:${port}/opencode/run`;
     this.httpBaseUrl = `http://${host}:${port}/opencode`;
 
-    // Restore cached session if available in localStorage
+    // Restore cached session and remote PC URL if available in localStorage
     if (isBrowser) {
-      this.currentSessionId = localStorage.getItem('yui_opencode_session') || null;
+      this.currentSessionId = localStorage.getItem('kala_opencode_session') || localStorage.getItem('yui_opencode_session') || null;
+      const remote = localStorage.getItem('kala_opencode_pc_url');
+      if (remote) {
+        this.setRemotePcUrl(remote);
+      }
+    }
+  }
+
+  public getRemotePcUrl(): string {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('kala_opencode_pc_url') || '';
+    }
+    return '';
+  }
+
+  public setRemotePcUrl(rawUrl: string) {
+    const clean = rawUrl.trim().replace(/\/+$/, '');
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('kala_opencode_pc_url', clean);
+    }
+    if (clean) {
+      const isHttps = clean.startsWith('https://');
+      const noProto = clean.replace(/^https?:\/\//, '');
+      const wsProto = isHttps ? 'wss://' : 'ws://';
+      this.wsBaseUrl = `${wsProto}${noProto}/opencode/run`;
+      this.httpBaseUrl = `${clean}/opencode`;
     }
   }
 
@@ -72,14 +97,14 @@ export class OpenCodeClient {
   public setSession(sessionId: string) {
     this.currentSessionId = sessionId;
     if (typeof window !== 'undefined') {
-      localStorage.setItem('yui_opencode_session', sessionId);
+      localStorage.setItem('kala_opencode_session', sessionId);
     }
   }
 
   public clearSession() {
     this.currentSessionId = null;
     if (typeof window !== 'undefined') {
-      localStorage.removeItem('yui_opencode_session');
+      localStorage.removeItem('kala_opencode_session');
     }
   }
 
@@ -108,17 +133,94 @@ export class OpenCodeClient {
       return this.runTaskElectron(options);
     }
 
+    // 2. Try remote PC bridge if configured
+    const remoteUrl = this.getRemotePcUrl();
+    if (remoteUrl) {
+      try {
+        this.notifyProgress('OpenCode: Conectando a PC...', `Conectando con ${remoteUrl}`);
+        return await this.runTaskWebSocket({
+          ...options,
+          sessionId: effectiveSessionId
+        });
+      } catch (wsErr) {
+        console.warn('[OpenCode] Remote WebSocket failed, trying HTTP:', wsErr);
+        try {
+          return await this.runTaskHttp({
+            ...options,
+            sessionId: effectiveSessionId
+          });
+        } catch (httpErr) {
+          console.warn('[OpenCode] Remote PC unreachable, falling back to Gemini Flash Lite:', httpErr);
+        }
+      }
+    }
+
+    // 3. Fallback: Gemini 2.5 Flash Lite autonomous coding engine
+    this.notifyProgress('Kala Code: Modo Autónomo', 'PC no conectada. Usando Gemini 2.5 Flash Lite...');
+    return this.runTaskGeminiFallback(options);
+  }
+
+  public async runTaskGeminiFallback(options: OpenCodeTaskOptions): Promise<OpenCodeTaskResult> {
+    this.notifyProgress('Kala Code: Pensando...', 'Generando código con Gemini 2.5 Flash Lite');
+    const { keyPool } = await import('./gemini');
+    const key = keyPool.getActiveKey();
+
+    const systemPrompt = `Eres el motor agéntico de desarrollo y programación de KALA.
+El usuario te solicita una tarea de programación, refactorización, creación o análisis de código.
+Genera la solución técnica óptima con explicaciones breves, limpias y código modular listo para producción.
+Si creas archivos o código, usa bloques de código markdown con el lenguaje especificado (ej. \`\`\`python, \`\`\`typescript).
+Razona de forma metódica en bloques <thought>...</thought>.`;
+
+    const userPrompt = options.file 
+      ? `[Archivo de trabajo: ${options.file}]\n${options.prompt}`
+      : options.prompt;
+
+    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${key.key}`;
+    
     try {
-      return await this.runTaskWebSocket({
-        ...options,
-        sessionId: effectiveSessionId
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          systemInstruction: { parts: [{ text: systemPrompt }] },
+          contents: [{ role: 'user', parts: [{ text: userPrompt }] }],
+          generationConfig: { temperature: 0.4, maxOutputTokens: 2500 }
+        })
       });
-    } catch (wsErr) {
-      console.warn('[OpenCode] WebSocket execution failed, falling back to HTTP SSE:', wsErr);
-      return await this.runTaskHttp({
-        ...options,
-        sessionId: effectiveSessionId
-      });
+
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}: ${await res.text()}`);
+      }
+
+      const data = await res.json();
+      const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+      
+      let thought = '';
+      let cleanText = rawText;
+      const thoughtMatch = rawText.match(/<thought>([\s\S]*?)<\/thought>/);
+      if (thoughtMatch) {
+        thought = thoughtMatch[1].trim();
+        cleanText = rawText.replace(/<thought>[\s\S]*?<\/thought>/, '').trim();
+        this.notifyThought(thought);
+      }
+
+      this.notifyProgress('Kala Code: Completado ✓', 'Solución generada con Gemini 2.5 Flash Lite');
+
+      return {
+        success: true,
+        text: cleanText,
+        reasoning: thought,
+        toolsUsed: [{ tool: 'gemini_flash_lite_engine', input: { prompt: options.prompt } }],
+        exitCode: 0
+      };
+    } catch (err: any) {
+      return {
+        success: false,
+        text: `Error al generar código: ${err.message}`,
+        toolsUsed: [],
+        exitCode: 1,
+        error: err.message
+      };
     }
   }
 
