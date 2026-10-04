@@ -1198,6 +1198,78 @@ export class DynamicIsland {
             <span class="text-[10px] text-cyan-300 bg-cyan-950/60 border border-cyan-800/60 px-2 py-0.5 rounded-full">${loc}</span>
           </div>
         `;
+      } else if (toolResult.enabled !== undefined && (toolResult.message?.toLowerCase().includes('linterna') || toolResult.toolName === 'control_flashlight')) {
+        const on = !!toolResult.enabled;
+        displayText += `
+          <div class="mt-2 p-2.5 bg-slate-950/70 border ${on ? 'border-amber-500/50 shadow-amber-500/10' : 'border-slate-800'} rounded-xl flex items-center justify-between text-xs font-mono shadow-md">
+            <div class="flex items-center gap-2.5">
+              <span class="text-xl ${on ? 'text-amber-400 animate-pulse' : 'text-slate-600'}">🔦</span>
+              <div>
+                <div class="font-bold text-slate-100">${on ? 'Linterna encendida' : 'Linterna apagada'}</div>
+                <div class="text-[10px] text-slate-400">Control de hardware Android</div>
+              </div>
+            </div>
+            <span class="text-[10px] px-2 py-0.5 rounded-full font-bold ${on ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40' : 'bg-slate-800 text-slate-400'}">${on ? 'ON' : 'OFF'}</span>
+          </div>
+        `;
+      } else if (toolResult.level !== undefined && toolResult.isCharging !== undefined) {
+        const lvl = toolResult.level;
+        const charging = !!toolResult.isCharging;
+        const color = lvl > 50 ? 'emerald' : (lvl > 20 ? 'amber' : 'rose');
+        displayText += `
+          <div class="mt-2 p-2.5 bg-slate-950/70 border border-slate-800 rounded-xl space-y-2 text-xs font-mono shadow-md">
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-2">
+                <span class="text-lg">${charging ? '⚡' : '🔋'}</span>
+                <span class="font-bold text-slate-100">${lvl}% Batería</span>
+              </div>
+              <span class="text-[10px] px-2 py-0.5 rounded-full bg-${color}-500/20 text-${color}-300 border border-${color}-500/30">
+                ${charging ? 'Cargando (' + (toolResult.pluggedType || 'AC') + ')' : toolResult.status || 'En uso'}
+              </span>
+            </div>
+            <div class="w-full bg-slate-800 rounded-full h-2 overflow-hidden">
+              <div class="bg-${color}-400 h-2 rounded-full transition-all duration-500" style="width: ${lvl}%"></div>
+            </div>
+          </div>
+        `;
+      } else if (toolResult.type === 'timer' || toolResult.type === 'alarm') {
+        const isTimer = toolResult.type === 'timer';
+        const label = toolResult.label || (isTimer ? 'Temporizador' : 'Alarma');
+        const detail = isTimer 
+          ? `${Math.floor(toolResult.seconds / 60)}m ${toolResult.seconds % 60}s` 
+          : `${toolResult.hour}:${(toolResult.minutes < 10 ? '0' + toolResult.minutes : toolResult.minutes)}`;
+        displayText += `
+          <div class="mt-2 p-2.5 bg-slate-950/70 border border-cyan-800/50 rounded-xl flex items-center justify-between text-xs font-mono shadow-md">
+            <div class="flex items-center gap-2.5">
+              <span class="text-xl">${isTimer ? '⏱️' : '⏰'}</span>
+              <div>
+                <div class="font-bold text-slate-100">${label}</div>
+                <div class="text-[10px] text-cyan-400 font-bold">${detail}</div>
+              </div>
+            </div>
+            <span class="text-[10px] bg-cyan-950/80 text-cyan-300 border border-cyan-700/60 px-2 py-0.5 rounded-full font-bold">Configurado ✓</span>
+          </div>
+        `;
+      } else if (toolResult.toolName === 'send_whatsapp_message' || (toolResult.phone !== undefined && toolResult.message)) {
+        displayText += `
+          <div class="mt-2 p-2.5 bg-slate-950/70 border border-emerald-800/50 rounded-xl space-y-1 text-xs font-mono shadow-md">
+            <div class="flex items-center justify-between text-emerald-400 text-[10px] pb-1 border-b border-emerald-950">
+              <span class="flex items-center gap-1.5 font-bold">💬 WhatsApp ${toolResult.phone ? `<span class="text-slate-400 font-normal">(${toolResult.phone})</span>` : ''}</span>
+              <span class="bg-emerald-950/90 text-emerald-300 px-2 py-0.5 rounded-full text-[9px]">Listo ✓</span>
+            </div>
+            <div class="text-slate-200 text-xs italic bg-slate-900/60 p-1.5 rounded-lg border border-slate-800">"${toolResult.message}"</div>
+          </div>
+        `;
+      } else if (toolResult.direction !== undefined && (toolResult.message?.includes('Volumen') || toolResult.toolName === 'control_device_volume')) {
+        displayText += `
+          <div class="mt-2 p-2.5 bg-slate-950/70 border border-indigo-800/50 rounded-xl flex items-center justify-between text-xs font-mono shadow-md">
+            <div class="flex items-center gap-2">
+              <span class="text-lg">${toolResult.direction === 'mute' ? '🔇' : (toolResult.direction === 'down' ? '🔉' : '🔊')}</span>
+              <span class="font-bold text-slate-100">Volumen ${toolResult.direction === 'mute' ? 'Silenciado' : (toolResult.direction === 'down' ? 'Reducido' : 'Aumentado')}</span>
+            </div>
+            ${toolResult.level !== undefined ? `<span class="text-[10px] bg-indigo-950 text-indigo-300 px-2 py-0.5 rounded-full border border-indigo-800">${toolResult.level}%</span>` : ''}
+          </div>
+        `;
       }
     }
 

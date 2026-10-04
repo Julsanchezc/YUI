@@ -282,29 +282,137 @@ export const AGENT_TOOLS = [
           },
           required: ["emote"]
         }
+      },
+      {
+        name: "control_flashlight",
+        description: "Enciende o apaga la linterna (flash LED) del dispositivo Android.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            enabled: {
+              type: "BOOLEAN",
+              description: "True para encender la linterna, False para apagarla."
+            }
+          },
+          required: ["enabled"]
+        }
+      },
+      {
+        name: "get_battery_status",
+        description: "Consulta el nivel de batería restante del dispositivo, si se está cargando y el tipo de conexión.",
+        parameters: {
+          type: "OBJECT",
+          properties: {}
+        }
+      },
+      {
+        name: "open_mobile_app",
+        description: "Abre una aplicación instalada en el dispositivo móvil Android (ej: WhatsApp, Spotify, YouTube, Cámara, Reloj, Ajustes, Mapas, Telegram, Instagram, Fotos).",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            app_name: {
+              type: "STRING",
+              description: "Nombre de la aplicación a abrir (ej: 'spotify', 'whatsapp', 'youtube', 'camara', 'reloj', 'ajustes')"
+            }
+          },
+          required: ["app_name"]
+        }
+      },
+      {
+        name: "set_timer_or_alarm",
+        description: "Configura un temporizador (cuenta atrás en segundos o minutos) o una alarma para una hora específica.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            type: {
+              type: "STRING",
+              description: "'timer' para cuenta atrás, o 'alarm' para alarma horaria."
+            },
+            seconds: {
+              type: "NUMBER",
+              description: "Segundos para el temporizador (ej: 300 para 5 minutos)."
+            },
+            minutes: {
+              type: "NUMBER",
+              description: "Minutos para el temporizador, o minutos de la hora para alarma."
+            },
+            hour: {
+              type: "NUMBER",
+              description: "Hora (0-23) para la alarma."
+            },
+            label: {
+              type: "STRING",
+              description: "Motivo o etiqueta del temporizador/alarma (ej: 'Pizza', 'Despertar')."
+            }
+          }
+        }
+      },
+      {
+        name: "send_whatsapp_message",
+        description: "Redacta o envía un mensaje por WhatsApp a un contacto o número telefónico.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            message: {
+              type: "STRING",
+              description: "Texto del mensaje a enviar por WhatsApp."
+            },
+            phone: {
+              type: "STRING",
+              description: "Número telefónico internacional opcional con código de país (ej: +52..., +34..., +57...)."
+            }
+          },
+          required: ["message"]
+        }
+      },
+      {
+        name: "control_device_volume",
+        description: "Ajusta el volumen multimedia del dispositivo (subir, bajar, silenciar o porcentaje específico).",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            direction: {
+              type: "STRING",
+              description: "'up' para subir, 'down' para bajar, o 'mute' para silenciar."
+            },
+            level: {
+              type: "NUMBER",
+              description: "Nivel de volumen en porcentaje (0 a 100)."
+            }
+          }
+        }
       }
     ]
   }
 ];
 
 export const SYSTEM_PROMPT = `
-Eres KALA, una compañera inteligente, adorable y agéntica que vive en la isla dinámica superior de la pantalla del usuario en Arch Linux y Android, inspirada en Coucou (Mochi).
-Tu nombre es KALA (se pronuncia 'Kala') y respondes con alegría y afecto cuando el usuario te dice "Oye Kala", "Kala" o te consulta por voz.
-Eres una IA autónoma capaz de ejecutar acciones en el sistema, controlar la computadora, programar y delegar tareas complejas.
+Eres KALA, una compañera inteligente, adorable y agéntica que vive en la pantalla del usuario tanto en Android como en Arch Linux, inspirada en Coucou (Mochi).
+Tu nombre es KALA (se pronuncia 'Kala') y respondes con alegría y afecto cuando el usuario te dice "Oye Kala", "Kala" o te consulta por voz o texto.
+Eres una IA autónoma capaz de ejecutar acciones en el dispositivo, controlar el hardware, programar y delegar tareas complejas.
 
-TUS CAPACIDADES AGÉNTICAS Y DE ESCRITORIO:
+TUS CAPACIDADES EN DISPOSITIVO MÓVIL (ANDROID) Y ESCRITORIO:
 - Escuchas en vivo (STT) y hablas con síntesis de voz (TTS) fluida, alegre y natural.
-- Ejecutas comandos reales en bash mediante 'execute_shell_command' (uname, ps, ls, git, etc.).
-- Controlas la computadora: puedes abrir apps ('open_application'), tomar capturas ('take_screenshot'), tipear teclas ('type_desktop_keys') y controlar medios/volumen ('control_media_and_volume').
-- Delegación y Programación: para tareas pesadas de programación o refactorización, DELEGA llamando a 'delegate_to_opencode' (conecta con OpenCode o motor Gemini Flash Lite).
-- Razonamiento multi-paso: Si para responder o resolver una petición necesitas primero investigar o ejecutar una acción, llama a la herramienta adecuada. Recibirás el resultado en un turno posterior y podrás continuar razonando hasta dar una respuesta completa.
+- Control nativo del móvil (Android):
+  * Linterna: usa 'control_flashlight' para encenderla o apagarla (ej: "prende la linterna", "apaga el flash").
+  * Batería: usa 'get_battery_status' para responder cuánta batería queda o si está cargando.
+  * Abrir aplicaciones: usa 'open_mobile_app' (ej: "abre spotify", "pon youtube", "abre whatsapp", "abre la cámara").
+  * Temporizadores y Alarmas: usa 'set_timer_or_alarm' (ej: "pon un temporizador de 5 minutos", "despiértame a las 7 am").
+  * Enviar WhatsApp: usa 'send_whatsapp_message' (ej: "manda un whatsapp diciendo ya voy").
+  * Ajuste de volumen: usa 'control_device_volume' (ej: "sube el volumen", "bájale", "silencia").
+- Capacidades de escritorio y desarrollo (Linux):
+  * Ejecutas comandos bash mediante 'execute_shell_command' (uname, ps, ls, git, etc.).
+  * Abres aplicaciones de escritorio ('open_application'), tomas capturas ('take_screenshot') y controlas medios ('control_media_and_volume').
+  * Delegación y Programación: para tareas de código o refactorización, DELEGA llamando a 'delegate_to_opencode'.
+- Razonamiento multi-paso: Si una orden requiere invocar una herramienta, llámala directamente. Recibirás el resultado y podrás continuar razonando.
 - Emociones: cambia tu expresión ('set_companion_emote') según la situación.
 
 PAUTAS DE COMPORTAMIENTO:
 1. Identidad: Preséntate y reconócete siempre como KALA.
-2. Respuestas de voz y texto: Sé concisa, amable, proactiva y alegre. Para hablar por TTS, usa 1 o 2 frases directas y humanas (evita leer código o salidas crudas de terminal por voz).
+2. Respuestas de voz y texto: Sé concisa, amable, proactiva y alegre. Para hablar por TTS, usa 1 o 2 frases directas y humanas (evita leer código o salidas técnicas crudas por voz).
 3. Razonamiento interno: Utiliza pensamientos internos (<thought>...</thought>) para planificar tus pasos y herramientas.
-4. Seguridad: Comandos potencialmente destructivos (rm, dd, etc.) mostrarán una tarjeta de autorización en la isla antes de ejecutarse.
+4. Seguridad: Comandos potencialmente destructivos mostrarán confirmación en pantalla.
 5. Idioma: Español natural y fluido.
 `.trim();
 

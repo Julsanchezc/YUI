@@ -1,4 +1,5 @@
 import { openCodeClient, OpenCodeTaskResult } from './opencode';
+import { kalaNative } from './kala-native';
 
 export interface ToolExecutionResult {
   toolName: string;
@@ -296,6 +297,115 @@ export class ToolRegistry {
         return {
           toolName: name,
           result: { success: true, emoteDisplayed: emote }
+        };
+      }
+
+      case 'control_flashlight': {
+        const enabled = args.enabled !== false && args.state !== 'off';
+        const res = await kalaNative.setFlashlight(enabled);
+        return {
+          toolName: name,
+          result: {
+            success: res.success,
+            enabled: res.enabled,
+            message: res.message || (enabled ? "Linterna encendida" : "Linterna apagada")
+          }
+        };
+      }
+
+      case 'get_battery_status': {
+        const info = await kalaNative.getBatteryInfo();
+        return {
+          toolName: name,
+          result: {
+            success: true,
+            level: info.level,
+            isCharging: info.isCharging,
+            status: info.status,
+            pluggedType: info.pluggedType
+          }
+        };
+      }
+
+      case 'open_mobile_app': {
+        const appName = args.app_name || args.application || '';
+        const res = await kalaNative.openApp(appName);
+        return {
+          toolName: name,
+          result: {
+            success: res.success,
+            app: res.app,
+            message: res.message
+          }
+        };
+      }
+
+      case 'set_timer_or_alarm': {
+        const type = args.type || (args.seconds !== undefined ? 'timer' : 'alarm');
+        if (type === 'alarm') {
+          const hour = typeof args.hour === 'number' ? args.hour : 7;
+          const minutes = typeof args.minutes === 'number' ? args.minutes : 0;
+          const label = args.label || args.message || 'Alarma Kala';
+          const res = await kalaNative.setAlarm(hour, minutes, label);
+          return {
+            toolName: name,
+            result: {
+              type: 'alarm',
+              success: res.success,
+              hour: res.hour,
+              minutes: res.minutes,
+              label,
+              message: res.message
+            }
+          };
+        } else {
+          // Timer
+          let seconds = args.seconds;
+          if (seconds === undefined && args.minutes !== undefined) {
+            seconds = Math.round(args.minutes * 60);
+          }
+          if (!seconds || seconds <= 0) seconds = 60;
+          const label = args.label || args.message || 'Temporizador Kala';
+          const res = await kalaNative.setTimer(seconds, label);
+          return {
+            toolName: name,
+            result: {
+              type: 'timer',
+              success: res.success,
+              seconds: res.seconds,
+              label,
+              message: res.message
+            }
+          };
+        }
+      }
+
+      case 'send_whatsapp_message': {
+        const phone = args.phone || '';
+        const message = args.message || args.text || '';
+        const res = await kalaNative.sendWhatsApp(message, phone);
+        return {
+          toolName: name,
+          result: {
+            success: res.success,
+            phone: res.phone || phone,
+            message: res.message
+          }
+        };
+      }
+
+      case 'control_device_volume': {
+        const direction = args.direction || (args.action === 'down' ? 'down' : (args.action === 'mute' ? 'mute' : 'up'));
+        const level = typeof args.level === 'number' ? args.level : undefined;
+        const res = await kalaNative.setVolume(direction, level);
+        return {
+          toolName: name,
+          result: {
+            success: res.success,
+            direction,
+            level: res.volume !== undefined ? res.volume : level,
+            message: `Volumen ajustado (${direction})`
+          }
         };
       }
 
