@@ -24,6 +24,13 @@
 
         </activity>
 
+        <!-- Foreground Service for Background "Oye Kala" Wake Word -->
+        <service
+            android:name=".KalaWakeWordService"
+            android:enabled="true"
+            android:exported="false"
+            android:foregroundServiceType="microphone" />
+
         <!-- Assist Activity (Hardware Long-Press Power, Home button, swipe from corner) -->
         <activity
             android:name=".AssistActivity"
@@ -40,7 +47,7 @@
         <!-- System Voice Interaction Service (Default Digital Assistant) -->
         <service
             android:name=".YuiVoiceInteractionService"
-            android:label="YUI Companion Assistant"
+            android:label="Kala Companion Assistant"
             android:permission="android.permission.BIND_VOICE_INTERACTION"
             android:exported="true">
             <meta-data
@@ -79,7 +86,12 @@
     <!-- Permissions -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 </manifest>

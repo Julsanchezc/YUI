@@ -6,6 +6,8 @@ import { Sound } from '../core/audio-sfx';
 import { keyPool, callGemini } from '../core/gemini';
 import { speechEngine } from '../core/speech';
 import { toolRegistry } from '../core/tools';
+import { openCodeClient } from '../core/opencode';
+import { kalaNative } from '../core/kala-native';
 import { ApprovalManager } from './approval';
 
 export type IslandMode = 'pill' | 'compact' | 'expanded';
@@ -13,6 +15,7 @@ export type IslandMode = 'pill' | 'compact' | 'expanded';
 export class DynamicIsland {
   public root: HTMLElement;
   public mode: IslandMode = 'pill';
+  public isMobile: boolean = false;
 
   private companion: CharacterEngine;
   private approvalManager: ApprovalManager;
@@ -31,8 +34,8 @@ export class DynamicIsland {
   private keyBadge: HTMLElement;
   private approvalContainer: HTMLElement;
   private waveBars: HTMLElement[];
-  private collapseBtn: HTMLElement;
-  private toggleBtn: HTMLElement;
+  private collapseBtn: HTMLElement | null;
+  private toggleBtn: HTMLElement | null;
   private audioWaveContainer: HTMLElement;
 
   // Conversation Context
@@ -41,14 +44,15 @@ export class DynamicIsland {
 
   constructor(root: HTMLElement) {
     this.root = root;
+    this.isMobile = kalaNative.isMobile();
     this.renderLayout();
 
     // Query elements
-    this.notchElement = root.querySelector('#islandNotch')!;
-    this.canvasElement = root.querySelector('#companionCanvas')!;
+    this.notchElement = (root.querySelector('#islandNotch') || root.querySelector('#kalaMobileContainer') || root) as HTMLElement;
+    this.canvasElement = (root.querySelector('#companionCanvasHero') || root.querySelector('#companionCanvas')) as HTMLCanvasElement;
     this.pillBadge = root.querySelector('#pillBadge')!;
     this.statusText = root.querySelector('#statusText')!;
-    this.expandedPanel = root.querySelector('#expandedPanel')!;
+    this.expandedPanel = (root.querySelector('#expandedPanel') || root.querySelector('#mobileMainStream') || root) as HTMLElement;
     this.messagesContainer = root.querySelector('#messagesContainer')!;
     this.thinkingContainer = root.querySelector('#thinkingContainer')!;
     this.thinkingContent = root.querySelector('#thinkingContent')!;
@@ -57,12 +61,13 @@ export class DynamicIsland {
     this.keyBadge = root.querySelector('#keyBadge')!;
     this.approvalContainer = root.querySelector('#approvalContainer')!;
     this.waveBars = Array.from(root.querySelectorAll('.wave-bar'));
-    this.collapseBtn = root.querySelector('#collapseBtn')!;
-    this.toggleBtn = root.querySelector('#toggleExpandBtn')!;
+    this.collapseBtn = root.querySelector('#collapseBtn') as HTMLElement || null;
+    this.toggleBtn = root.querySelector('#toggleExpandBtn') as HTMLElement || null;
     this.audioWaveContainer = root.querySelector('#audioWaveContainer')!;
 
     // Init Companion Engine
-    this.companion = new CharacterEngine(this.canvasElement);
+    const canvasCssSize = this.isMobile ? 112 : 28;
+    this.companion = new CharacterEngine(this.canvasElement, canvasCssSize, canvasCssSize);
     this.companion.startAnimation();
 
     // Init Approval Manager
@@ -75,16 +80,148 @@ export class DynamicIsland {
     this.updateKeyBadge();
 
     // Set initial mode cleanly
-    this.applyModeStyles('pill');
+    this.applyModeStyles(this.isMobile ? 'expanded' : 'pill');
 
     // Greeting on launch
     setTimeout(() => {
       this.companion.greet();
-      this.addMessage('model', '¡Hola! Soy Kala. Estoy en tu isla lista para escuchar, pensar y asistirte con Gemini.');
+      if (this.isMobile) {
+        this.addMessage('model', '¡Hola! Soy Kala, tu asistente de voz para Android con Gemini 3.5. Di **"Oye Kala"** en cualquier momento o pulsa el micrófono para hablar.');
+      } else {
+        this.addMessage('model', '¡Hola! Soy Kala. Estoy en tu isla lista para escuchar, pensar y asistirte con Gemini.');
+      }
     }, 600);
   }
 
   private renderLayout() {
+    if (this.isMobile) {
+      this.renderMobileLayout();
+    } else {
+      this.renderDesktopLayout();
+    }
+  }
+
+  private renderMobileLayout() {
+    this.root.innerHTML = `
+      <div id="kalaMobileContainer" class="kala-mobile-root text-slate-100 flex flex-col h-full w-full select-none">
+        
+        <!-- Mobile Top Bar -->
+        <header class="flex items-center justify-between px-3.5 py-2.5 bg-slate-950/85 backdrop-blur-md border-b border-slate-800/80 flex-shrink-0 z-20">
+          <div class="flex items-center gap-2">
+            <div class="relative w-8 h-8 rounded-full bg-slate-900 border border-cyan-500/40 flex items-center justify-center overflow-hidden">
+              <canvas id="companionCanvas" width="72" height="72" class="w-8 h-8 cursor-pointer"></canvas>
+            </div>
+            <div>
+              <div class="flex items-center gap-1.5">
+                <span class="font-bold text-xs tracking-wider font-mono text-cyan-300">KALA</span>
+                <span id="pillBadge" class="w-1.5 h-1.5 rounded-full bg-cyan-400"></span>
+                <span class="text-[9px] font-mono bg-cyan-950/70 border border-cyan-800/50 text-cyan-300 px-1.5 py-0.2 rounded-full">3.5 Lite</span>
+              </div>
+              <div id="statusText" class="text-[9px] text-slate-400 font-mono truncate max-w-[120px]">En espera</div>
+            </div>
+          </div>
+
+          <!-- Quick action buttons -->
+          <div class="flex items-center gap-1.5">
+            <!-- Background Wake Word Toggle -->
+            <button id="wakeWordToggleBtn" class="flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-mono font-bold bg-slate-900 border border-slate-700 text-slate-300 transition active:scale-95 shadow-sm" title="Activar/Desactivar escucha en segundo plano">
+              <span id="wakeWordDot" class="w-1.5 h-1.5 rounded-full bg-slate-500"></span>
+              <span id="wakeWordText">Oye Kala</span>
+            </button>
+
+            <button id="keyBadge" class="text-[9px] font-mono bg-slate-900 border border-slate-700/60 px-1.5 py-0.5 rounded text-cyan-300 hover:border-cyan-500/50 transition">
+              JA1
+            </button>
+
+            <button id="btnAssistantSettings" class="p-1 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-400 text-xs font-mono active:scale-95" title="Asistente predeterminado de Android">
+              ⭐
+            </button>
+            <button id="btnPcOpenCode" class="p-1 rounded-lg bg-blue-500/10 border border-blue-500/30 text-blue-400 text-xs font-mono active:scale-95" title="Conectar PC OpenCode">
+              💻
+            </button>
+          </div>
+        </header>
+
+        <!-- Mobile Main Stream -->
+        <main id="mobileMainStream" class="flex-1 overflow-y-auto px-3.5 py-3 space-y-3">
+          <!-- Hero Stage (large Kala avatar in center when starting) -->
+          <div id="heroCompanionStage" class="flex flex-col items-center justify-center py-4 text-center space-y-2.5">
+            <div class="relative w-32 h-32 flex items-center justify-center">
+              <div class="absolute inset-0 rounded-full bg-cyan-500/15 blur-2xl orb-pulse"></div>
+              <div class="absolute inset-1 rounded-full border border-cyan-500/25"></div>
+              <canvas id="companionCanvasHero" width="280" height="280" class="w-28 h-28 cursor-pointer z-10 transition-transform active:scale-95"></canvas>
+            </div>
+            <div>
+              <h2 class="text-base font-bold text-slate-100 flex items-center justify-center gap-1.5">
+                <span>Kala</span>
+                <span class="text-[10px] text-cyan-400 font-mono px-2 py-0.5 rounded-full bg-cyan-950/60 border border-cyan-800/60">Android Assistant</span>
+              </h2>
+              <p class="text-[11px] text-slate-400 max-w-[260px] mx-auto mt-1 leading-relaxed">
+                Di <span class="text-cyan-400 font-semibold font-mono">"Oye Kala"</span> o pulsa el micrófono inferior para hablar.
+              </p>
+            </div>
+          </div>
+
+          <!-- Approval container -->
+          <div id="approvalContainer" class="hidden"></div>
+
+          <!-- Thinking trace -->
+          <details id="thinkingContainer" class="hidden bg-slate-900/90 border border-purple-500/40 rounded-2xl p-2.5 text-xs font-mono text-purple-200 group">
+            <summary class="cursor-pointer font-bold uppercase text-[10px] tracking-wider text-purple-400 flex items-center justify-between select-none list-none">
+              <div class="flex items-center gap-1.5">
+                <span class="animate-spin">⚙</span>
+                <span>Razonamiento Agéntico (Gemini 3.5)</span>
+              </div>
+              <span class="text-[9px] text-purple-400/80 group-open:rotate-180 transition-transform">▼</span>
+            </summary>
+            <div id="thinkingContent" class="text-slate-300 text-[11px] leading-relaxed max-h-24 overflow-y-auto pl-2 border-l border-purple-500/40 mt-1.5"></div>
+          </details>
+
+          <!-- Messages Container -->
+          <div id="messagesContainer" class="space-y-2.5 pb-2">
+            <!-- Chat bubbles -->
+          </div>
+        </main>
+
+        <!-- Mobile Bottom Thumb Dock -->
+        <footer class="bg-slate-950/95 backdrop-blur-xl border-t border-slate-800/90 px-3.5 pt-2 pb-3 flex flex-col gap-2 z-20">
+          <!-- Horizontal Quick Chips -->
+          <div class="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-0.5 text-[11px] font-mono">
+            <button onclick="window.yuiTriggerQuick('¿Cuál es el estado del sistema?')" class="flex-shrink-0 px-2.5 py-1 rounded-full bg-slate-900 border border-slate-800 text-slate-300 hover:text-cyan-300 active:scale-95 shadow-sm">📊 Sistema</button>
+            <button onclick="window.yuiTriggerQuick('¿Qué clima hace hoy?')" class="flex-shrink-0 px-2.5 py-1 rounded-full bg-slate-900 border border-slate-800 text-slate-300 hover:text-cyan-300 active:scale-95 shadow-sm">🌤️ Clima</button>
+            <button onclick="window.yuiTriggerQuick('Kala, crea una función en Python para ordenar un array')" class="flex-shrink-0 px-2.5 py-1 rounded-full bg-purple-950/50 border border-purple-800/50 text-purple-300 font-bold active:scale-95 shadow-sm">⚡ Código</button>
+            <button onclick="window.kalaConfigurePcUrl && window.kalaConfigurePcUrl()" class="flex-shrink-0 px-2.5 py-1 rounded-full bg-blue-950/50 border border-blue-800/50 text-blue-300 active:scale-95 shadow-sm">💻 PC OpenCode</button>
+            <label class="flex items-center gap-1 text-[10px] text-slate-400 px-2 flex-shrink-0 cursor-pointer">
+              <input type="checkbox" id="ttsToggle" checked class="accent-cyan-400">
+              <span>Voz</span>
+            </label>
+          </div>
+
+          <!-- Thumb Bar (Input + Giant Mic) -->
+          <div class="flex items-center gap-2">
+            <div class="flex-1 flex items-center bg-slate-900/90 border border-slate-700/80 rounded-2xl px-3 py-2 focus-within:border-cyan-500 shadow-inner">
+              <input type="text" id="textInput" placeholder="Escribe a Kala o pulsa el micro..." class="flex-1 bg-transparent text-xs text-slate-100 placeholder-slate-500 focus:outline-none min-w-0">
+              <button id="sendBtn" class="text-cyan-400 hover:text-cyan-300 font-bold p-1 active:scale-95 flex-shrink-0">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"/></svg>
+              </button>
+            </div>
+
+            <!-- Giant Floating Mic Action Button -->
+            <button id="micButton" title="Hablar con Kala" class="relative w-12 h-12 rounded-2xl bg-gradient-to-tr from-cyan-600 to-cyan-400 text-slate-950 flex items-center justify-center shadow-lg shadow-cyan-500/20 active:scale-90 transition-transform flex-shrink-0">
+              <div id="audioWaveContainer" class="flex items-center gap-0.5 h-3 px-1 pointer-events-none absolute hidden">
+                <div class="w-0.5 bg-slate-950 rounded-full h-1 wave-bar"></div>
+                <div class="w-0.5 bg-slate-950 rounded-full h-2.5 wave-bar"></div>
+                <div class="w-0.5 bg-slate-950 rounded-full h-1 wave-bar"></div>
+              </div>
+              <svg id="micIcon" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"/></svg>
+            </button>
+          </div>
+        </footer>
+      </div>
+    `;
+  }
+
+  private renderDesktopLayout() {
     this.root.innerHTML = `
       <div id="islandContainer" class="fixed top-0 left-0 right-0 flex justify-center z-50 pointer-events-none select-none">
         
@@ -124,7 +261,7 @@ export class DynamicIsland {
                 JA1
               </button>
 
-              <button id="micButton" title="Hablar con YUI (STT)" class="w-6 h-6 rounded-full bg-cyan-500 hover:bg-cyan-400 text-slate-950 flex items-center justify-center transition shadow-sm active:scale-95">
+              <button id="micButton" title="Hablar con Kala (STT)" class="w-6 h-6 rounded-full bg-cyan-500 hover:bg-cyan-400 text-slate-950 flex items-center justify-center transition shadow-sm active:scale-95">
                 <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"/></svg>
               </button>
 
@@ -140,7 +277,7 @@ export class DynamicIsland {
               </button>
 
               <!-- Close Desktop Button -->
-              <button id="closeDesktopBtn" title="Cerrar YUI" class="text-slate-500 hover:text-rose-400 p-1 rounded transition hidden">
+              <button id="closeDesktopBtn" title="Cerrar Kala" class="text-slate-500 hover:text-rose-400 p-1 rounded transition hidden">
                 <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
               </button>
             </div>
@@ -158,7 +295,7 @@ export class DynamicIsland {
               <summary class="cursor-pointer font-bold uppercase text-[10px] tracking-wider text-purple-400 flex items-center justify-between select-none list-none">
                 <div class="flex items-center gap-1.5">
                   <span class="animate-spin">⚙</span>
-                  <span>Pensamiento Agéntico (Gemini 2.0 Reasoning)</span>
+                  <span>Pensamiento Agéntico (Gemini 3.5)</span>
                 </div>
                 <span class="text-[9px] text-purple-400/80 group-open:rotate-180 transition-transform">▼</span>
               </summary>
@@ -220,24 +357,105 @@ export class DynamicIsland {
       this.companion.onCursorMove(e.clientX, e.clientY);
     });
 
-    // Header toggle
-    const header = this.root.querySelector('#notchHeader')!;
-    header.addEventListener('click', (e) => {
-      const target = e.target as HTMLElement;
-      if (target.closest('button') || target.closest('canvas')) return;
-      this.toggleExpand();
-    });
+    // Header toggle (Desktop)
+    const header = this.root.querySelector('#notchHeader');
+    if (header) {
+      header.addEventListener('click', (e) => {
+        const target = e.target as HTMLElement;
+        if (target.closest('button') || target.closest('canvas')) return;
+        this.toggleExpand();
+      });
+    }
 
-    this.toggleBtn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      this.toggleExpand();
-    });
+    if (this.toggleBtn) {
+      this.toggleBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.toggleExpand();
+      });
+    }
 
     // Collapse button in expanded header
-    this.collapseBtn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      this.setMode('pill');
-    });
+    if (this.collapseBtn) {
+      this.collapseBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.setMode('pill');
+      });
+    }
+
+    // Background Wake Word Toggle Button (Android Foreground Service)
+    const wakeWordToggleBtn = this.root.querySelector('#wakeWordToggleBtn') as HTMLElement;
+    if (wakeWordToggleBtn) {
+      const updateWakeWordUI = (active: boolean) => {
+        const dot = this.root.querySelector('#wakeWordDot') as HTMLElement;
+        const text = this.root.querySelector('#wakeWordText') as HTMLElement;
+        if (dot) dot.className = `w-1.5 h-1.5 rounded-full ${active ? 'bg-emerald-400 animate-pulse' : 'bg-slate-500'}`;
+        if (text) text.textContent = active ? 'Oye Kala: ON' : 'Oye Kala: OFF';
+        if (wakeWordToggleBtn) {
+          wakeWordToggleBtn.className = `flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-mono font-bold border transition active:scale-95 shadow-sm ${
+            active ? 'bg-emerald-950/80 border-emerald-500/60 text-emerald-300' : 'bg-slate-900 border-slate-700 text-slate-300'
+          }`;
+        }
+      };
+
+      // Check current status or auto-start if previously enabled
+      kalaNative.isWakeWordActive().then(active => {
+        const pref = localStorage.getItem('kala_wake_word_enabled');
+        if (kalaNative.isNative() && (pref === null || pref === 'true') && !active) {
+          kalaNative.startWakeWord().then(running => updateWakeWordUI(running));
+        } else {
+          updateWakeWordUI(active);
+        }
+      });
+
+      wakeWordToggleBtn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        Sound.play('blip');
+        kalaNative.triggerHaptic(60);
+        const current = await kalaNative.isWakeWordActive();
+        if (current) {
+          await kalaNative.stopWakeWord();
+          updateWakeWordUI(false);
+          this.addMessage('model', '💤 **Escucha en segundo plano desactivada.** Kala no responderá a "Oye Kala" con la app minimizada.');
+        } else {
+          const started = await kalaNative.startWakeWord();
+          updateWakeWordUI(started);
+          if (started) {
+            this.addMessage('model', '🎙️ **¡Oye Kala activado!** El servicio nativo está activo en tu barra de notificaciones y responderá incluso con la pantalla apagada.');
+          } else {
+            this.addMessage('model', '⚠️ No se pudo iniciar el servicio en segundo plano. Comprueba los permisos de micrófono en Ajustes.');
+          }
+        }
+      });
+    }
+
+    // Android Assistant Settings & PC Buttons
+    const btnAssistantSettings = this.root.querySelector('#btnAssistantSettings');
+    if (btnAssistantSettings) {
+      btnAssistantSettings.addEventListener('click', (e) => {
+        e.stopPropagation();
+        kalaNative.triggerHaptic(50);
+        kalaNative.openAssistantSettings();
+      });
+    }
+
+    const btnPcOpenCode = this.root.querySelector('#btnPcOpenCode');
+    if (btnPcOpenCode) {
+      btnPcOpenCode.addEventListener('click', (e) => {
+        e.stopPropagation();
+        kalaNative.triggerHaptic(50);
+        (window as any).kalaConfigurePcUrl();
+      });
+    }
+
+    // Hero canvas interaction
+    const heroCanvas = this.root.querySelector('#companionCanvasHero');
+    if (heroCanvas) {
+      heroCanvas.addEventListener('click', (e) => {
+        e.stopPropagation();
+        kalaNative.triggerHaptic(40);
+        this.companion.poke();
+      });
+    }
 
     // Close desktop button
     const closeDesktopBtn = this.root.querySelector('#closeDesktopBtn') as HTMLElement;
@@ -293,15 +511,17 @@ export class DynamicIsland {
       }
     });
 
-    // Click outside detection: click outside the notch collapses to pill
-    document.addEventListener('click', (e) => {
-      if (this.mode === 'expanded') {
-        const target = e.target as HTMLElement;
-        if (!this.notchElement.contains(target)) {
-          this.setMode('pill');
+    // Click outside detection: click outside the notch collapses to pill (Desktop only)
+    if (!this.isMobile) {
+      document.addEventListener('click', (e) => {
+        if (this.mode === 'expanded') {
+          const target = e.target as HTMLElement;
+          if (!this.notchElement.contains(target)) {
+            this.setMode('pill');
+          }
         }
-      }
-    });
+      });
+    }
 
     // Emote quick button
     const btnEmote = this.root.querySelector('#btnEmoteQuick')!;
@@ -319,28 +539,24 @@ export class DynamicIsland {
       this.handleUserQuery(q);
     };
 
-    // System Assistant Invocation (Android Assist / Power Button / Swipe)
-    (window as any).yuiTriggerVoiceAssistant = () => {
-      this.setMode('expanded');
+    // System Assistant Invocation (Android Assist / Power Button / Swipe / Background Wake Word)
+    (window as any).kalaTriggerAssistantVoice = () => {
+      kalaNative.triggerHaptic(80);
       Sound.play('open');
       this.companion.triggerEmote('wink');
+      if (!this.isMobile && this.mode !== 'expanded') {
+        this.setMode('expanded');
+      }
       setTimeout(() => {
-        if (!this.isRecording) {
-          this.startListening();
-        }
-      }, 350);
+        this.micButton.click();
+      }, 250);
     };
+    (window as any).yuiTriggerVoiceAssistant = (window as any).kalaTriggerAssistantVoice;
 
     // Open Android Assistant Settings
     (window as any).yuiOpenAssistantSettings = async () => {
-      try {
-        const { Plugins } = await import('@capacitor/core');
-        if (Plugins && (Plugins as any).YuiAssistant) {
-          await (Plugins as any).YuiAssistant.openAssistantSettings();
-        }
-      } catch (e) {
-        console.warn('No se pudo abrir la configuración del asistente:', e);
-      }
+      kalaNative.triggerHaptic(50);
+      await kalaNative.openAssistantSettings();
     };
 
     // Configure Remote PC OpenCode URL
@@ -566,6 +782,13 @@ export class DynamicIsland {
   }
 
   private applyModeStyles(mode: IslandMode) {
+    if (this.isMobile) {
+      if (mode === 'expanded') {
+        setTimeout(() => this.textInput?.focus(), 150);
+      }
+      return;
+    }
+
     const notch = this.notchElement;
     const expandPanel = this.expandedPanel;
     const expandIcon = this.root.querySelector('#expandIcon');
@@ -582,9 +805,11 @@ export class DynamicIsland {
       notch.classList.add('w-[95vw]', 'max-w-[640px]', 'h-[85vh]', 'max-h-[520px]');
       expandPanel.classList.remove('hidden');
       expandPanel.classList.add('flex');
-      collapseBtn.classList.remove('hidden');
-      collapseBtn.classList.add('flex');
-      toggleBtn.classList.add('hidden');
+      if (collapseBtn) {
+        collapseBtn.classList.remove('hidden');
+        collapseBtn.classList.add('flex');
+      }
+      if (toggleBtn) toggleBtn.classList.add('hidden');
       if (expandIcon) expandIcon.classList.add('rotate-180');
       // Focus input field in expanded mode
       setTimeout(() => this.textInput.focus(), 150);
@@ -592,17 +817,21 @@ export class DynamicIsland {
       notch.classList.add('w-[92vw]', 'max-w-[480px]', 'h-[56px]');
       expandPanel.classList.add('hidden');
       expandPanel.classList.remove('flex');
-      collapseBtn.classList.add('hidden');
-      collapseBtn.classList.remove('flex');
-      toggleBtn.classList.remove('hidden');
+      if (collapseBtn) {
+        collapseBtn.classList.add('hidden');
+        collapseBtn.classList.remove('flex');
+      }
+      if (toggleBtn) toggleBtn.classList.remove('hidden');
       if (expandIcon) expandIcon.classList.remove('rotate-180');
     } else { // pill
       notch.classList.add('w-[360px]', 'max-w-[96vw]', 'h-[42px]');
       expandPanel.classList.add('hidden');
       expandPanel.classList.remove('flex');
-      collapseBtn.classList.add('hidden');
-      collapseBtn.classList.remove('flex');
-      toggleBtn.classList.remove('hidden');
+      if (collapseBtn) {
+        collapseBtn.classList.add('hidden');
+        collapseBtn.classList.remove('flex');
+      }
+      if (toggleBtn) toggleBtn.classList.remove('hidden');
       if (expandIcon) expandIcon.classList.remove('rotate-180');
     }
   }
@@ -680,6 +909,13 @@ export class DynamicIsland {
 
     this.messagesContainer.appendChild(div);
     this.messagesContainer.scrollTop = this.messagesContainer.scrollHeight;
+
+    if (this.isMobile) {
+      const hero = this.root.querySelector('#heroCompanionStage') as HTMLElement;
+      if (hero && this.conversation.length > 0) {
+        hero.classList.add('hidden');
+      }
+    }
   }
 
   private async handleUserQuery(query: string) {

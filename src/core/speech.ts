@@ -2,6 +2,8 @@
 // Supports ElevenLabs Primary Voice Engine (with auto-fallback to standard voices)
 // Supports Multimodal Gemini Audio Recording STT for Linux Wayland & Electron
 
+import { kalaNative } from './kala-native';
+
 export interface SpeechCallbacks {
   onSpeechStart?: () => void;
   onSpeechResult?: (transcript: string, isFinal: boolean) => void;
@@ -64,6 +66,9 @@ export class SpeechEngine {
 
   public async startListening(callbacks: SpeechCallbacks): Promise<boolean> {
     if (this.isListening) return true;
+
+    // Trigger physical haptic feedback
+    kalaNative.triggerHaptic(50);
 
     // Barge-in: Stop any speaking voice immediately when user initiates listening
     this.stopSpeaking();
