@@ -29,7 +29,7 @@ export class SpeechEngine {
 
   // ElevenLabs Primary Voice Engine Config
   public elevenLabsApiKey: string = '';
-  public elevenLabsVoiceId: string = 'IqGIz3dgA7lYSRe3s8tS';
+  public elevenLabsVoiceId: string = 'EXAVITQu4vr4xnSDxMaL';
   private currentAudioSource: AudioBufferSourceNode | null = null;
   private ttsAudioCtx: AudioContext | null = null;
 
@@ -45,7 +45,7 @@ export class SpeechEngine {
       const envVoice = (import.meta as any).env?.VITE_ELEVENLABS_VOICE_ID;
 
       this.elevenLabsApiKey = storedKey || envKey || '';
-      this.elevenLabsVoiceId = storedVoice || envVoice || 'IqGIz3dgA7lYSRe3s8tS';
+      this.elevenLabsVoiceId = storedVoice || envVoice || 'EXAVITQu4vr4xnSDxMaL';
     }
   }
 
