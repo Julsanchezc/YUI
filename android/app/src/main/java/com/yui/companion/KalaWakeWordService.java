@@ -139,10 +139,10 @@ public class KalaWakeWordService extends Service {
 
     public synchronized void resumeListening() {
         if (!isRunning) return;
-        Log.d(TAG, "Reanudando escucha nativa en segundo plano.");
+        Log.d(TAG, "Reanudando escucha nativa de wake word.");
         isPaused = false;
         isTriggering = false;
-        restartListeningDelayed(300);
+        restartListeningDelayed(150);
     }
 
     private void startListening() {
@@ -169,14 +169,15 @@ public class KalaWakeWordService extends Service {
                 speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this);
                 recognizerIntent = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
                 recognizerIntent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
-                recognizerIntent.putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault().toString());
+                recognizerIntent.putExtra(RecognizerIntent.EXTRA_LANGUAGE, "es-ES");
+                recognizerIntent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, "es-ES");
                 recognizerIntent.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 5);
                 recognizerIntent.putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true);
 
                 speechRecognizer.setRecognitionListener(new RecognitionListener() {
                     @Override
                     public void onReadyForSpeech(Bundle params) {
-                        Log.d(TAG, "SpeechRecognizer listo para escuchar...");
+                        Log.d(TAG, "SpeechRecognizer listo para escuchar 'Oye Kala'...");
                     }
 
                     @Override
@@ -193,9 +194,10 @@ public class KalaWakeWordService extends Service {
 
                     @Override
                     public void onError(int error) {
-                        Log.d(TAG, "SpeechRecognizer error: " + error + ". Reiniciando escucha...");
+                        Log.d(TAG, "SpeechRecognizer status/error: " + error);
                         if (!isPaused && isRunning) {
-                            restartListeningDelayed(600);
+                            long delay = (error == SpeechRecognizer.ERROR_NO_MATCH || error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT) ? 150 : 500;
+                            restartListeningDelayed(delay);
                         }
                     }
 
@@ -209,7 +211,7 @@ public class KalaWakeWordService extends Service {
                             triggerKalaActivation(query);
                         } else {
                             if (!isPaused && isRunning) {
-                                restartListeningDelayed(400);
+                                restartListeningDelayed(200);
                             }
                         }
                     }
@@ -243,10 +245,16 @@ public class KalaWakeWordService extends Service {
         if (matches == null || matches.isEmpty()) return false;
         for (String phrase : matches) {
             if (phrase == null) continue;
-            String lower = phrase.toLowerCase(Locale.ROOT);
-            if (lower.contains("kala") || lower.contains("oye kala") || lower.contains("hey kala") || 
-                lower.contains("ok kala") || lower.contains("hola kala") || lower.contains("calla")) {
-                Log.i(TAG, "Wake word detectada: " + lower);
+            String lower = phrase.toLowerCase(Locale.ROOT)
+                .replace("á", "a")
+                .replace("é", "e")
+                .replace("í", "i")
+                .replace("ó", "o")
+                .replace("ú", "u");
+            if (lower.contains("kala") || lower.contains("cala") || lower.contains("calla") || 
+                lower.contains("kayla") || lower.contains("cayla") || lower.contains("oye cala") ||
+                lower.contains("oye kala")) {
+                Log.i(TAG, "Wake word detectada en frase: " + phrase);
                 return true;
             }
         }
@@ -255,7 +263,7 @@ public class KalaWakeWordService extends Service {
 
     private String extractSpokenQuery(ArrayList<String> matches) {
         if (matches == null || matches.isEmpty()) return null;
-        Pattern pattern = Pattern.compile("(?i)^(?:oye|hey|ok|hola)?\\s*(?:kala|calla)\\s*(.+)$");
+        Pattern pattern = Pattern.compile("(?i)^(?:oye|hey|ok|hola|oie)?\\s*(?:kala|cala|calla|calá|kayla|cayla)\\s*(.+)$");
         for (String phrase : matches) {
             if (phrase == null) continue;
             String trimmed = phrase.trim();
@@ -314,6 +322,29 @@ public class KalaWakeWordService extends Service {
             if (spokenQuery != null && !spokenQuery.trim().isEmpty()) {
                 intent.putExtra("spoken_query", spokenQuery.trim());
             }
+
+            PendingIntent fullScreenPendingIntent = PendingIntent.getActivity(
+                this,
+                (int) System.currentTimeMillis(),
+                intent,
+                PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT
+            );
+
+            Notification wakeNotification = new NotificationCompat.Builder(this, CHANNEL_ID)
+                .setSmallIcon(android.R.drawable.ic_btn_speak_now)
+                .setContentTitle("Kala")
+                .setContentText(spokenQuery != null ? spokenQuery : "Escuchando...")
+                .setPriority(NotificationCompat.PRIORITY_MAX)
+                .setCategory(NotificationCompat.CATEGORY_CALL)
+                .setFullScreenIntent(fullScreenPendingIntent, true)
+                .setAutoCancel(true)
+                .build();
+
+            NotificationManager manager = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
+            if (manager != null) {
+                manager.notify(NOTIFICATION_ID + 1, wakeNotification);
+            }
+
             startActivity(intent);
         } catch (Exception e) {
             Log.e(TAG, "Error lanzando MainActivity", e);

@@ -191,6 +191,7 @@ export class DynamicIsland {
             <button onclick="window.yuiTriggerQuick('¿Qué clima hace hoy?')" class="flex-shrink-0 px-2.5 py-1 rounded-full bg-slate-900 border border-slate-800 text-slate-300 hover:text-cyan-300 active:scale-95 shadow-sm">🌤️ Clima</button>
             <button onclick="window.yuiTriggerQuick('Kala, crea una función en Python para ordenar un array')" class="flex-shrink-0 px-2.5 py-1 rounded-full bg-purple-950/50 border border-purple-800/50 text-purple-300 font-bold active:scale-95 shadow-sm">⚡ Código</button>
             <button onclick="window.kalaConfigurePcUrl && window.kalaConfigurePcUrl()" class="flex-shrink-0 px-2.5 py-1 rounded-full bg-blue-950/50 border border-blue-800/50 text-blue-300 active:scale-95 shadow-sm">💻 PC OpenCode</button>
+            <button id="btnEmoteQuick" class="flex-shrink-0 px-2.5 py-1 rounded-full bg-slate-900 border border-slate-800 text-slate-300 hover:text-cyan-300 active:scale-95 shadow-sm">🎭 Emote</button>
             <label class="flex items-center gap-1 text-[10px] text-slate-400 px-2 flex-shrink-0 cursor-pointer">
               <input type="checkbox" id="ttsToggle" checked class="accent-cyan-400">
               <span>Voz</span>
@@ -476,29 +477,43 @@ export class DynamicIsland {
     }
 
     // Key pool badge click -> Rotate key manually
-    this.keyBadge.addEventListener('click', (e) => {
-      e.stopPropagation();
-      const newKey = keyPool.manualRotate();
-      Sound.play('blip');
-      this.updateKeyBadge();
-      this.addMessage('model', `He rotado la clave activa a [${newKey.id}].`);
-    });
+    if (this.keyBadge) {
+      this.keyBadge.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const newKey = keyPool.manualRotate();
+        Sound.play('blip');
+        this.updateKeyBadge();
+        this.addMessage('model', `He rotado la clave activa a [${newKey.id}].`);
+      });
+    }
 
     keyPool.onKeyStatusChanged = () => this.updateKeyBadge();
 
     // Text Send
-    const sendBtn = this.root.querySelector('#sendBtn')!;
+    const sendBtn = this.root.querySelector('#sendBtn');
     const sendMsg = () => {
+      if (!this.textInput) return;
       const text = this.textInput.value.trim();
       if (!text || this.isProcessing) return;
       this.textInput.value = '';
       this.handleUserQuery(text);
     };
 
-    sendBtn.addEventListener('click', sendMsg);
-    this.textInput.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') sendMsg();
-    });
+    if (sendBtn) {
+      sendBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        sendMsg();
+      });
+    }
+
+    if (this.textInput) {
+      this.textInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          sendMsg();
+        }
+      });
+    }
 
     // Global Keyboard Shortcuts (Ctrl+K to toggle, Escape to collapse)
     window.addEventListener('keydown', (e) => {
@@ -524,14 +539,17 @@ export class DynamicIsland {
     }
 
     // Emote quick button
-    const btnEmote = this.root.querySelector('#btnEmoteQuick')!;
-    const emotes = ['love', 'proud', 'surprised', 'wink', 'happy'];
-    let emoteIdx = 0;
-    btnEmote.addEventListener('click', () => {
-      const em = emotes[emoteIdx % emotes.length];
-      emoteIdx++;
-      this.companion.triggerEmote(em);
-    });
+    const btnEmote = this.root.querySelector('#btnEmoteQuick');
+    if (btnEmote) {
+      const emotes = ['love', 'proud', 'surprised', 'wink', 'happy'];
+      let emoteIdx = 0;
+      btnEmote.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const em = emotes[emoteIdx % emotes.length];
+        emoteIdx++;
+        this.companion.triggerEmote(em);
+      });
+    }
 
     // Expose quick query handler on window
     (window as any).yuiTriggerQuick = (q: string) => {

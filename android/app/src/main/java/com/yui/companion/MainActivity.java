@@ -70,6 +70,20 @@ public class MainActivity extends BridgeActivity {
         }
 
         @PluginMethod
+        public void pauseWakeWord(PluginCall call) {
+            KalaWakeWordService.pauseListeningFromApp();
+            call.resolve();
+        }
+
+        @PluginMethod
+        public void resumeWakeWord(PluginCall call) {
+            if (KalaWakeWordService.isServiceRunning()) {
+                KalaWakeWordService.resumeListeningFromApp();
+            }
+            call.resolve();
+        }
+
+        @PluginMethod
         public void triggerHaptic(PluginCall call) {
             try {
                 Vibrator vibrator = (Vibrator) getContext().getSystemService(Context.VIBRATOR_SERVICE);
@@ -118,8 +132,10 @@ public class MainActivity extends BridgeActivity {
     @Override
     public void onResume() {
         super.onResume();
-        // Liberar micrófono nativo mientras la UI de la app está en primer plano
-        KalaWakeWordService.pauseListeningFromApp();
+        // Mantener escucha continua de "Oye Kala" activa tanto en primer plano como en segundo plano
+        if (KalaWakeWordService.isServiceRunning()) {
+            KalaWakeWordService.resumeListeningFromApp();
+        }
     }
 
     @Override

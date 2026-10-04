@@ -4,6 +4,8 @@ export interface KalaAssistantPlugin {
   startWakeWord(): Promise<{ running: boolean }>;
   stopWakeWord(): Promise<{ running: boolean }>;
   isWakeWordActive(): Promise<{ running: boolean }>;
+  pauseWakeWord(): Promise<void>;
+  resumeWakeWord(): Promise<void>;
   triggerHaptic(options?: { duration?: number }): Promise<void>;
   openAssistantSettings(): Promise<void>;
 }
@@ -20,14 +22,21 @@ export class KalaNativeService {
     return KalaNativeService.instance;
   }
 
+  public isElectron(): boolean {
+    if (typeof window === 'undefined') return false;
+    return !!((window as any).electronAPI || /Electron/i.test(navigator.userAgent));
+  }
+
   public isNative(): boolean {
     return Capacitor.isNativePlatform();
   }
 
   public isMobile(): boolean {
+    // Desktop Electron jamás es considerado móvil independientemente del ancho de la ventana
+    if (this.isElectron()) return false;
     if (this.isNative()) return true;
     if (typeof window === 'undefined') return false;
-    return window.innerWidth < 640 || /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+    return /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
   }
 
   public async startWakeWord(): Promise<boolean> {
@@ -64,6 +73,24 @@ export class KalaNativeService {
       return res.running;
     } catch (e) {
       return false;
+    }
+  }
+
+  public async pauseWakeWord(): Promise<void> {
+    if (!this.isNative()) return;
+    try {
+      await KalaAssistant.pauseWakeWord();
+    } catch (e) {
+      console.warn('[KalaNative] Error pausando wake word:', e);
+    }
+  }
+
+  public async resumeWakeWord(): Promise<void> {
+    if (!this.isNative()) return;
+    try {
+      await KalaAssistant.resumeWakeWord();
+    } catch (e) {
+      console.warn('[KalaNative] Error reanudando wake word:', e);
     }
   }
 

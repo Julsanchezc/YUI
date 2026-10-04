@@ -40,7 +40,11 @@ export class SpeechEngine {
   public loadElevenLabsConfig() {
     if (typeof window !== 'undefined') {
       const storedKey = localStorage.getItem('yui_elevenlabs_key');
-      const storedVoice = localStorage.getItem('yui_elevenlabs_voice_id');
+      let storedVoice = localStorage.getItem('yui_elevenlabs_voice_id');
+      if (storedVoice === 'IqGIz3dgA7lYSRe3s8tS') {
+        storedVoice = 'EXAVITQu4vr4xnSDxMaL';
+        localStorage.setItem('yui_elevenlabs_voice_id', storedVoice);
+      }
       const envKey = (import.meta as any).env?.VITE_ELEVENLABS_API_KEY;
       const envVoice = (import.meta as any).env?.VITE_ELEVENLABS_VOICE_ID;
 
@@ -98,6 +102,9 @@ export class SpeechEngine {
 
     // Barge-in: Stop any speaking voice immediately when user initiates listening
     this.stopSpeaking();
+
+    // Pausar el reconocedor en segundo plano de Android para que no colisione con el micrófono web
+    await kalaNative.pauseWakeWord();
 
     try {
       if (!navigator.mediaDevices?.getUserMedia) {
@@ -277,6 +284,9 @@ export class SpeechEngine {
   }
 
   private cleanAudioAnalyser() {
+    // Reanudar el reconocedor de wake word en Android
+    kalaNative.resumeWakeWord();
+
     if (this.levelAnimFrame) {
       cancelAnimationFrame(this.levelAnimFrame);
       this.levelAnimFrame = null;
@@ -417,46 +427,83 @@ export class SpeechEngine {
       }
 
       const audioData = await response.arrayBuffer();
-      const AudioCtor = window.AudioContext || (window as any).webkitAudioContext;
-      this.ttsAudioCtx = new AudioCtor();
-      const audioBuffer = await this.ttsAudioCtx.decodeAudioData(audioData);
 
-      const source = this.ttsAudioCtx.createBufferSource();
-      source.buffer = audioBuffer;
+      // Intento 1: Reproducción con Web Audio API y sincronización de visemas
+      try {
+        const AudioCtor = window.AudioContext || (window as any).webkitAudioContext;
+        this.ttsAudioCtx = new AudioCtor();
+        if (this.ttsAudioCtx.state === 'suspended') {
+          try {
+            await this.ttsAudioCtx.resume();
+          } catch (resErr) {
+            console.warn('[TTS] AudioContext resume aviso:', resErr);
+          }
+        }
+        const audioBuffer = await this.ttsAudioCtx.decodeAudioData(audioData.slice(0));
 
-      const analyser = this.ttsAudioCtx.createAnalyser();
-      analyser.fftSize = 64;
-      source.connect(analyser);
-      analyser.connect(this.ttsAudioCtx.destination);
+        const source = this.ttsAudioCtx.createBufferSource();
+        source.buffer = audioBuffer;
 
-      this.currentAudioSource = source;
+        const analyser = this.ttsAudioCtx.createAnalyser();
+        analyser.fftSize = 64;
+        source.connect(analyser);
+        analyser.connect(this.ttsAudioCtx.destination);
 
-      // Análisis FFT en tiempo real para visemas faciales de YUI
-      const dataArray = new Uint8Array(analyser.frequencyBinCount);
-      let visemeFrame: number | null = null;
+        this.currentAudioSource = source;
 
-      const analyzeVisemes = () => {
-        if (!this.currentAudioSource || !analyser) return;
-        analyser.getByteFrequencyData(dataArray);
-        let sum = 0;
-        for (let i = 0; i < dataArray.length; i++) sum += dataArray[i];
-        const avg = sum / dataArray.length;
-        const normalized = Math.min(1, avg / 110);
-        if (this.onSpeakingViseme) this.onSpeakingViseme(normalized);
+        // Análisis FFT en tiempo real para visemas faciales de Kala
+        const dataArray = new Uint8Array(analyser.frequencyBinCount);
+        let visemeFrame: number | null = null;
+
+        const analyzeVisemes = () => {
+          if (!this.currentAudioSource || !analyser) return;
+          analyser.getByteFrequencyData(dataArray);
+          let sum = 0;
+          for (let i = 0; i < dataArray.length; i++) sum += dataArray[i];
+          const avg = sum / dataArray.length;
+          const normalized = Math.min(1, avg / 110);
+          if (this.onSpeakingViseme) this.onSpeakingViseme(normalized);
+          visemeFrame = requestAnimationFrame(analyzeVisemes);
+        };
         visemeFrame = requestAnimationFrame(analyzeVisemes);
-      };
-      visemeFrame = requestAnimationFrame(analyzeVisemes);
 
-      source.onended = () => {
-        if (visemeFrame) cancelAnimationFrame(visemeFrame);
-        if (this.onSpeakingChange) this.onSpeakingChange(false);
-        if (this.onSpeakingViseme) this.onSpeakingViseme(0);
-        this.currentAudioSource = null;
-        if (onDone) onDone();
-      };
+        source.onended = () => {
+          if (visemeFrame) cancelAnimationFrame(visemeFrame);
+          if (this.onSpeakingChange) this.onSpeakingChange(false);
+          if (this.onSpeakingViseme) this.onSpeakingViseme(0);
+          this.currentAudioSource = null;
+          if (onDone) onDone();
+        };
 
-      source.start(0);
-      return true;
+        source.start(0);
+        return true;
+
+      } catch (audioErr) {
+        console.warn('[ElevenLabs] Web Audio API falló, usando HTML5 Audio fallback:', audioErr);
+        // Intento 2: Fallback directo con elemento HTML5 Audio
+        try {
+          const blob = new Blob([audioData], { type: 'audio/mpeg' });
+          const url = URL.createObjectURL(blob);
+          const audio = new Audio(url);
+          audio.onended = () => {
+            URL.revokeObjectURL(url);
+            if (this.onSpeakingChange) this.onSpeakingChange(false);
+            if (this.onSpeakingViseme) this.onSpeakingViseme(0);
+            if (onDone) onDone();
+          };
+          audio.onerror = () => {
+            URL.revokeObjectURL(url);
+            if (this.onSpeakingChange) this.onSpeakingChange(false);
+            this.speakBrowser(text, onDone);
+          };
+          if (this.onSpeakingChange) this.onSpeakingChange(true);
+          await audio.play();
+          return true;
+        } catch (hErr) {
+          console.warn('[ElevenLabs] Fallback HTML5 falló, pasando a síntesis del sistema:', hErr);
+          return false;
+        }
+      }
 
     } catch (e) {
       console.warn('[ElevenLabs] Error de reproducción TTS, usando fallback:', e);
