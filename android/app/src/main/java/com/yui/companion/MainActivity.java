@@ -1,12 +1,16 @@
 package com.yui.companion;
 
+import android.Manifest;
 import android.content.Context;
 import android.content.Intent;
+import android.content.pm.PackageManager;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.VibrationEffect;
 import android.os.Vibrator;
 import android.provider.Settings;
+import android.util.Log;
+import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
 import com.getcapacitor.BridgeActivity;
 import com.getcapacitor.JSObject;
@@ -14,8 +18,12 @@ import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
+import java.util.ArrayList;
+import java.util.List;
 
 public class MainActivity extends BridgeActivity {
+    private static final String TAG = "MainActivity";
+    private static final int PERMISSION_REQ_CODE = 1001;
 
     @CapacitorPlugin(name = "KalaAssistant")
     public static class KalaAssistantPlugin extends Plugin {
@@ -103,26 +111,74 @@ public class MainActivity extends BridgeActivity {
     public void onCreate(Bundle savedInstanceState) {
         registerPlugin(KalaAssistantPlugin.class);
         super.onCreate(savedInstanceState);
+        checkAndRequestPermissions();
         handleIntent(getIntent());
+    }
+
+    @Override
+    public void onResume() {
+        super.onResume();
+        // Liberar micrófono nativo mientras la UI de la app está en primer plano
+        KalaWakeWordService.pauseListeningFromApp();
+    }
+
+    @Override
+    public void onPause() {
+        super.onPause();
+        // Reanudar la escucha del wake word cuando la app pase a segundo plano si el servicio está activo
+        if (KalaWakeWordService.isServiceRunning()) {
+            KalaWakeWordService.resumeListeningFromApp();
+        }
     }
 
     @Override
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
+        setIntent(intent);
         handleIntent(intent);
     }
 
-    private void handleIntent(Intent intent) {
-        if (intent != null && intent.getBooleanExtra("trigger_assistant", false)) {
-            if (getBridge() != null && getBridge().getWebView() != null) {
-                getBridge().getWebView().post(() -> {
-                    getBridge().getWebView().evaluateJavascript(
-                        "window.kalaTriggerAssistantVoice && window.kalaTriggerAssistantVoice(); " +
-                        "window.yuiTriggerVoiceAssistant && window.yuiTriggerVoiceAssistant();", 
-                        null
-                    );
-                });
+    private void checkAndRequestPermissions() {
+        List<String> permissionsNeeded = new ArrayList<>();
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            permissionsNeeded.add(Manifest.permission.RECORD_AUDIO);
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+                permissionsNeeded.add(Manifest.permission.POST_NOTIFICATIONS);
             }
+        }
+        if (!permissionsNeeded.isEmpty()) {
+            ActivityCompat.requestPermissions(this, permissionsNeeded.toArray(new String[0]), PERMISSION_REQ_CODE);
+        }
+    }
+
+    private void handleIntent(Intent intent) {
+        if (intent == null) return;
+
+        String spokenQuery = intent.getStringExtra("spoken_query");
+        boolean triggerAssistant = intent.getBooleanExtra("trigger_assistant", false);
+
+        if (spokenQuery != null && !spokenQuery.trim().isEmpty()) {
+            final String cleanQuery = spokenQuery.trim()
+                .replace("\\", "\\\\")
+                .replace("'", "\\'")
+                .replace("\n", " ");
+            postToWebView("if (window.kalaProcessSpokenQuery) { window.kalaProcessSpokenQuery('" + cleanQuery + "'); }");
+        } else if (triggerAssistant) {
+            postToWebView("if (window.kalaTriggerAssistantVoice) { window.kalaTriggerAssistantVoice(); }");
+        }
+    }
+
+    private void postToWebView(String jsCode) {
+        if (getBridge() != null && getBridge().getWebView() != null) {
+            getBridge().getWebView().postDelayed(() -> {
+                try {
+                    getBridge().getWebView().evaluateJavascript(jsCode, null);
+                } catch (Exception e) {
+                    Log.e(TAG, "Error evaluating JS in WebView", e);
+                }
+            }, 300);
         }
     }
 }

@@ -547,9 +547,26 @@ export class DynamicIsland {
       if (!this.isMobile && this.mode !== 'expanded') {
         this.setMode('expanded');
       }
-      setTimeout(() => {
-        this.micButton.click();
-      }, 250);
+      // Only click mic if not already listening to avoid toggling off
+      if (!speechEngine.isCurrentlyListening()) {
+        setTimeout(() => {
+          if (!speechEngine.isCurrentlyListening()) {
+            this.micButton.click();
+          }
+        }, 150);
+      }
+    };
+
+    // One-shot continuous spoken query direct from Wake Word Service
+    (window as any).kalaProcessSpokenQuery = (query: string) => {
+      if (!query || !query.trim()) return;
+      kalaNative.triggerHaptic(60);
+      Sound.play('open');
+      this.companion.triggerEmote('think');
+      if (!this.isMobile && this.mode !== 'expanded') {
+        this.setMode('expanded');
+      }
+      this.handleUserQuery(query.trim());
     };
     (window as any).yuiTriggerVoiceAssistant = (window as any).kalaTriggerAssistantVoice;
 
@@ -677,17 +694,28 @@ export class DynamicIsland {
             if (transcript) {
               this.statusText.textContent = transcript;
             }
-            if (isFinal && transcript) {
+            if (isFinal) {
               isListening = false;
               this.micButton.classList.remove('bg-red-500', 'animate-pulse');
               this.micButton.classList.add('bg-cyan-500');
-              this.handleUserQuery(transcript);
+              if (transcript && transcript.trim()) {
+                this.handleUserQuery(transcript.trim());
+              } else {
+                this.statusText.textContent = "Listo";
+                this.companion.setState('idle');
+                if (this.mode === 'compact') {
+                  this.setMode('pill');
+                }
+              }
             }
           },
           onSpeechEnd: () => {
             isListening = false;
             this.micButton.classList.remove('bg-red-500', 'animate-pulse');
             this.micButton.classList.add('bg-cyan-500');
+            if (this.companion.getState() === 'listening') {
+              this.companion.setState('idle');
+            }
           },
           onError: () => {
             isListening = false;
@@ -921,6 +949,9 @@ export class DynamicIsland {
   private async handleUserQuery(query: string) {
     if (this.isProcessing) return;
     this.isProcessing = true;
+
+    // Barge-in: detener cualquier voz activa de Kala inmediatamente
+    speechEngine.stopSpeaking();
 
     this.addMessage('user', query);
     this.conversation.push({ role: 'user', parts: [{ text: query }] });

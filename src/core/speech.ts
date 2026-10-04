@@ -58,8 +58,34 @@ export class SpeechEngine {
     }
   }
 
+  // VAD & Voice Activity Detection Configuration
+  private readonly RMS_SPEECH_THRESHOLD = 0.030;  // Umbral de amplitud RMS para detectar habla activa
+  private readonly SILENCE_TIMEOUT_MS = 1500;     // 1.5s de silencio tras hablar detiene la grabación
+  private readonly INITIAL_SILENCE_MS = 5500;     // 5.5s si el usuario no habla tras abrir el micrófono
+  private readonly MAX_RECORDING_MS = 10000;      // 10s límite máximo absoluto
+
+  private hasUserSpoken: boolean = false;
+  private silenceStartTime: number | null = null;
+  private recordingStartTime: number = 0;
+
   public isSupported(): boolean {
     return typeof navigator !== 'undefined' && !!navigator.mediaDevices?.getUserMedia;
+  }
+
+  private getBestMimeType(): string {
+    const candidates = [
+      'audio/webm;codecs=opus',
+      'audio/webm',
+      'audio/mp4',
+      'audio/ogg;codecs=opus',
+      'audio/ogg'
+    ];
+    for (const type of candidates) {
+      if (typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(type)) {
+        return type;
+      }
+    }
+    return '';
   }
 
   // ── Speech-to-Text (STT) via MediaRecorder + Gemini 3.5 Multimodal Audio ──
@@ -83,7 +109,8 @@ export class SpeechEngine {
           channelCount: 1,
           sampleRate: 16000,
           echoCancellation: true,
-          noiseSuppression: true
+          noiseSuppression: true,
+          autoGainControl: true
         }
       });
 
@@ -91,36 +118,89 @@ export class SpeechEngine {
       this.audioCtx = new AudioCtor();
       const source = this.audioCtx.createMediaStreamSource(this.micStream);
       this.analyser = this.audioCtx.createAnalyser();
-      this.analyser.fftSize = 64;
+      this.analyser.fftSize = 256;
       source.connect(this.analyser);
 
-      // Realtime Audio Level Analyser for Wave Visualizer
-      const dataArray = new Uint8Array(this.analyser.frequencyBinCount);
-      const checkLevel = () => {
+      // Reset VAD state for this session
+      this.hasUserSpoken = false;
+      this.silenceStartTime = null;
+      this.recordingStartTime = performance.now();
+
+      const timeDomainData = new Float32Array(this.analyser.fftSize);
+      const freqData = new Uint8Array(this.analyser.frequencyBinCount);
+
+      // Realtime Audio Monitor & VAD (Silence Detector)
+      const monitorAudio = () => {
         if (!this.isListening || !this.analyser) return;
-        this.analyser.getByteFrequencyData(dataArray);
-        let sum = 0;
-        for (let i = 0; i < dataArray.length; i++) {
-          sum += dataArray[i];
-        }
-        const avg = sum / dataArray.length;
-        const normalized = Math.min(1, avg / 128);
+
+        // 1. Wave visualizer audio level
+        this.analyser.getByteFrequencyData(freqData);
+        let freqSum = 0;
+        for (let i = 0; i < freqData.length; i++) freqSum += freqData[i];
+        const avgFreq = freqSum / freqData.length;
+        const normalizedLevel = Math.min(1, avgFreq / 128);
         if (callbacks.onAudioLevel) {
-          callbacks.onAudioLevel(normalized);
+          callbacks.onAudioLevel(normalizedLevel);
         }
-        this.levelAnimFrame = requestAnimationFrame(checkLevel);
+
+        // 2. RMS Energy in time domain for Voice Activity Detection
+        this.analyser.getFloatTimeDomainData(timeDomainData);
+        let sumSquares = 0;
+        for (let i = 0; i < timeDomainData.length; i++) {
+          const sample = timeDomainData[i];
+          sumSquares += sample * sample;
+        }
+        const rms = Math.sqrt(sumSquares / timeDomainData.length);
+        const now = performance.now();
+        const elapsed = now - this.recordingStartTime;
+
+        // 3. VAD State Machine
+        if (!this.hasUserSpoken) {
+          if (rms >= this.RMS_SPEECH_THRESHOLD) {
+            this.hasUserSpoken = true;
+            this.silenceStartTime = null;
+          } else if (elapsed >= this.INITIAL_SILENCE_MS) {
+            console.log("[VAD] Silencio inicial excedido (5.5s). Deteniendo escucha...");
+            this.stopListening();
+            return;
+          }
+        } else {
+          // User already spoke: detect 1.5s of silence to finalize
+          if (rms < this.RMS_SPEECH_THRESHOLD) {
+            if (this.silenceStartTime === null) {
+              this.silenceStartTime = now;
+            } else if (now - this.silenceStartTime >= this.SILENCE_TIMEOUT_MS) {
+              console.log("[VAD] 1.5s de silencio detectado tras locución. Finalizando grabación...");
+              this.stopListening();
+              return;
+            }
+          } else {
+            // User resumed speaking
+            this.silenceStartTime = null;
+          }
+        }
+
+        // 4. Hard safety timeout (10s)
+        if (elapsed >= this.MAX_RECORDING_MS) {
+          console.log("[VAD] Timeout máximo (10s). Finalizando grabación...");
+          this.stopListening();
+          return;
+        }
+
+        this.levelAnimFrame = requestAnimationFrame(monitorAudio);
       };
-      this.levelAnimFrame = requestAnimationFrame(checkLevel);
 
-      // Start MediaRecorder
+      this.levelAnimFrame = requestAnimationFrame(monitorAudio);
+
+      // Start MediaRecorder with best supported MIME type
       this.audioChunks = [];
-      const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
-        ? 'audio/webm;codecs=opus'
-        : MediaRecorder.isTypeSupported('audio/ogg;codecs=opus')
-          ? 'audio/ogg;codecs=opus'
-          : 'audio/webm';
+      const chosenMime = this.getBestMimeType();
+      const recorderOptions: MediaRecorderOptions = {};
+      if (chosenMime) {
+        recorderOptions.mimeType = chosenMime;
+      }
 
-      this.mediaRecorder = new MediaRecorder(this.micStream, { mimeType });
+      this.mediaRecorder = new MediaRecorder(this.micStream, recorderOptions);
       this.mediaRecorder.ondataavailable = (e) => {
         if (e.data && e.data.size > 0) {
           this.audioChunks.push(e.data);
@@ -132,9 +212,19 @@ export class SpeechEngine {
         this.cleanAudioAnalyser();
         if (callbacks.onSpeechEnd) callbacks.onSpeechEnd();
 
-        if (this.audioChunks.length === 0) return;
-        const audioBlob = new Blob(this.audioChunks, { type: mimeType });
-        if (audioBlob.size < 600) return; // Audio too short or empty
+        if (this.audioChunks.length === 0) {
+          if (callbacks.onSpeechResult) callbacks.onSpeechResult("", false);
+          return;
+        }
+
+        const mimeToUse = chosenMime || this.mediaRecorder?.mimeType || 'audio/webm';
+        const audioBlob = new Blob(this.audioChunks, { type: mimeToUse });
+
+        // If audio too short or user never spoke, gracefully return empty
+        if (audioBlob.size < 600 || !this.hasUserSpoken) {
+          if (callbacks.onSpeechResult) callbacks.onSpeechResult("", false);
+          return;
+        }
 
         try {
           if (callbacks.onSpeechResult) {
@@ -182,6 +272,10 @@ export class SpeechEngine {
     }
   }
 
+  public isCurrentlyListening(): boolean {
+    return this.isListening;
+  }
+
   private cleanAudioAnalyser() {
     if (this.levelAnimFrame) {
       cancelAnimationFrame(this.levelAnimFrame);
@@ -195,6 +289,7 @@ export class SpeechEngine {
       try { this.audioCtx.close(); } catch (e) {}
       this.audioCtx = null;
     }
+    this.analyser = null;
   }
 
   private async transcribeWithGemini(blob: Blob): Promise<string> {
@@ -212,14 +307,16 @@ export class SpeechEngine {
     const key = keyPool.getActiveKey();
     const modelName = (import.meta as any).env?.VITE_GEMINI_MODEL || 'gemini-3.5-flash-lite';
     const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${key.key}`;
+    const cleanMime = (blob.type || "audio/webm").split(';')[0];
+
     const res = await fetch(endpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         contents: [{
           parts: [
-            { inlineData: { mimeType: blob.type.split(';')[0] || "audio/webm", data: base64Audio } },
-            { text: "Transcribe exactamente en español lo que dice el usuario en este audio. Devuelve ÚNICAMENTE la transcripción exacta sin comentarios adicionales, sin prefijos y sin comillas." }
+            { inlineData: { mimeType: cleanMime, data: base64Audio } },
+            { text: "Transcribe exactamente en español lo que dice el usuario en este audio. Si no hay voz inteligible o solo hay silencio, devuelve una cadena vacía. Devuelve ÚNICAMENTE la transcripción exacta sin comentarios adicionales, sin prefijos y sin comillas." }
           ]
         }]
       })
@@ -233,7 +330,21 @@ export class SpeechEngine {
 
     const data = await res.json();
     const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-    return rawText.replace(/^["']|["']$/g, '').trim();
+    const cleaned = rawText.replace(/^["']|["']$/g, '').trim();
+
+    // Discard silence hallucinations
+    const lower = cleaned.toLowerCase();
+    if (
+      lower === 'silencio' ||
+      lower === '(silencio)' ||
+      lower === '[silencio]' ||
+      lower.includes('audio inaudible') ||
+      lower.includes('no hay audio')
+    ) {
+      return '';
+    }
+
+    return cleaned;
   }
 
   // ── Text-to-Speech (TTS) ──────────────────────────────────────────────────

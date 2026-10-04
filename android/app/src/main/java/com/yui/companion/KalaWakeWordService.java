@@ -23,6 +23,8 @@ import android.util.Log;
 import androidx.core.app.NotificationCompat;
 import java.util.ArrayList;
 import java.util.Locale;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 public class KalaWakeWordService extends Service {
     private static final String TAG = "KalaWakeWordService";
@@ -32,7 +34,11 @@ public class KalaWakeWordService extends Service {
     public static final String ACTION_START = "com.yui.companion.ACTION_START_WAKE_WORD";
     public static final String ACTION_STOP = "com.yui.companion.ACTION_STOP_WAKE_WORD";
 
+    private static KalaWakeWordService instance = null;
     private static boolean isRunning = false;
+    private boolean isPaused = false;
+    private boolean isTriggering = false;
+
     private SpeechRecognizer speechRecognizer;
     private Intent recognizerIntent;
     private Handler handler;
@@ -42,9 +48,22 @@ public class KalaWakeWordService extends Service {
         return isRunning;
     }
 
+    public static void pauseListeningFromApp() {
+        if (instance != null) {
+            instance.pauseListening();
+        }
+    }
+
+    public static void resumeListeningFromApp() {
+        if (instance != null) {
+            instance.resumeListening();
+        }
+    }
+
     @Override
     public void onCreate() {
         super.onCreate();
+        instance = this;
         handler = new Handler(Looper.getMainLooper());
         createNotificationChannel();
     }
@@ -56,9 +75,12 @@ public class KalaWakeWordService extends Service {
             stopForeground(true);
             stopSelf();
             isRunning = false;
+            instance = null;
             return START_NOT_STICKY;
         }
 
+        isPaused = false;
+        isTriggering = false;
         startForegroundServiceNotification();
         startListening();
         isRunning = true;
@@ -106,8 +128,33 @@ public class KalaWakeWordService extends Service {
         }
     }
 
+    public synchronized void pauseListening() {
+        Log.d(TAG, "Pausando escucha nativa para liberar el micrófono.");
+        isPaused = true;
+        if (handler != null) {
+            handler.removeCallbacksAndMessages(null);
+        }
+        stopListening();
+    }
+
+    public synchronized void resumeListening() {
+        if (!isRunning) return;
+        Log.d(TAG, "Reanudando escucha nativa en segundo plano.");
+        isPaused = false;
+        isTriggering = false;
+        restartListeningDelayed(300);
+    }
+
     private void startListening() {
+        if (!isRunning && instance == null) return;
+        if (isPaused) {
+            Log.d(TAG, "startListening omitido porque el servicio está pausado.");
+            return;
+        }
+
         handler.post(() -> {
+            if (isPaused) return;
+
             try {
                 if (speechRecognizer != null) {
                     speechRecognizer.destroy();
@@ -147,7 +194,9 @@ public class KalaWakeWordService extends Service {
                     @Override
                     public void onError(int error) {
                         Log.d(TAG, "SpeechRecognizer error: " + error + ". Reiniciando escucha...");
-                        restartListeningDelayed(600);
+                        if (!isPaused && isRunning) {
+                            restartListeningDelayed(600);
+                        }
                     }
 
                     @Override
@@ -156,9 +205,13 @@ public class KalaWakeWordService extends Service {
                             ? results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION) 
                             : null;
                         if (checkWakeWord(matches)) {
-                            triggerKalaActivation();
+                            String query = extractSpokenQuery(matches);
+                            triggerKalaActivation(query);
+                        } else {
+                            if (!isPaused && isRunning) {
+                                restartListeningDelayed(400);
+                            }
                         }
-                        restartListeningDelayed(400);
                     }
 
                     @Override
@@ -167,7 +220,8 @@ public class KalaWakeWordService extends Service {
                             ? partialResults.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION) 
                             : null;
                         if (checkWakeWord(matches)) {
-                            triggerKalaActivation();
+                            String query = extractSpokenQuery(matches);
+                            triggerKalaActivation(query);
                         }
                     }
 
@@ -178,7 +232,9 @@ public class KalaWakeWordService extends Service {
                 speechRecognizer.startListening(recognizerIntent);
             } catch (Exception e) {
                 Log.e(TAG, "Error iniciando SpeechRecognizer", e);
-                restartListeningDelayed(1000);
+                if (!isPaused && isRunning) {
+                    restartListeningDelayed(1000);
+                }
             }
         });
     }
@@ -197,7 +253,31 @@ public class KalaWakeWordService extends Service {
         return false;
     }
 
-    private void triggerKalaActivation() {
+    private String extractSpokenQuery(ArrayList<String> matches) {
+        if (matches == null || matches.isEmpty()) return null;
+        Pattern pattern = Pattern.compile("(?i)^(?:oye|hey|ok|hola)?\\s*(?:kala|calla)\\s*(.+)$");
+        for (String phrase : matches) {
+            if (phrase == null) continue;
+            String trimmed = phrase.trim();
+            Matcher matcher = pattern.matcher(trimmed);
+            if (matcher.find()) {
+                String query = matcher.group(1);
+                if (query != null && !query.trim().isEmpty()) {
+                    Log.i(TAG, "Comando de voz continuo detectado: " + query.trim());
+                    return query.trim();
+                }
+            }
+        }
+        return null;
+    }
+
+    private synchronized void triggerKalaActivation(String spokenQuery) {
+        if (isTriggering) return;
+        isTriggering = true;
+
+        // Liberar el micrófono inmediatamente para el WebView
+        pauseListening();
+
         // 1. Respuesta Háptica
         try {
             Vibrator vibrator = (Vibrator) getSystemService(Context.VIBRATOR_SERVICE);
@@ -231,40 +311,54 @@ public class KalaWakeWordService extends Service {
             Intent intent = new Intent(this, MainActivity.class);
             intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_REORDER_TO_FRONT);
             intent.putExtra("trigger_assistant", true);
+            if (spokenQuery != null && !spokenQuery.trim().isEmpty()) {
+                intent.putExtra("spoken_query", spokenQuery.trim());
+            }
             startActivity(intent);
         } catch (Exception e) {
             Log.e(TAG, "Error lanzando MainActivity", e);
         }
+
+        if (handler != null) {
+            handler.postDelayed(() -> {
+                isTriggering = false;
+            }, 1500);
+        }
     }
 
     private void restartListeningDelayed(long delayMs) {
-        if (!isRunning) return;
-        handler.removeCallbacksAndMessages(null);
-        handler.postDelayed(() -> {
-            if (isRunning) {
-                startListening();
-            }
-        }, delayMs);
+        if (!isRunning || isPaused) return;
+        if (handler != null) {
+            handler.removeCallbacksAndMessages(null);
+            handler.postDelayed(() -> {
+                if (isRunning && !isPaused) {
+                    startListening();
+                }
+            }, delayMs);
+        }
     }
 
     private void stopListening() {
-        handler.post(() -> {
-            try {
-                if (speechRecognizer != null) {
-                    speechRecognizer.stopListening();
-                    speechRecognizer.cancel();
-                    speechRecognizer.destroy();
-                    speechRecognizer = null;
+        if (handler != null) {
+            handler.post(() -> {
+                try {
+                    if (speechRecognizer != null) {
+                        speechRecognizer.stopListening();
+                        speechRecognizer.cancel();
+                        speechRecognizer.destroy();
+                        speechRecognizer = null;
+                    }
+                } catch (Exception e) {
+                    Log.e(TAG, "Error deteniendo SpeechRecognizer", e);
                 }
-            } catch (Exception e) {
-                Log.e(TAG, "Error deteniendo SpeechRecognizer", e);
-            }
-        });
+            });
+        }
     }
 
     @Override
     public void onDestroy() {
         isRunning = false;
+        instance = null;
         stopListening();
         if (wakeLock != null && wakeLock.isHeld()) {
             wakeLock.release();
