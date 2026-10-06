@@ -65,7 +65,19 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "\${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "\$SCRIPT_DIR/.." && pwd)"
 
-# Clean stale singleton locks if no electron process running YUI is alive
+# Clean stale singleton locks if no electron process running YUI is alive or if lock PID is dead
+LOCK_FILE="$HOME/.config/yui-companion/SingletonLock"
+if [ -L "$LOCK_FILE" ] || [ -f "$LOCK_FILE" ]; then
+  LOCK_TARGET=$(readlink "$LOCK_FILE" 2>/dev/null || true)
+  LOCK_PID=$(echo "$LOCK_TARGET" | grep -oE '[0-9]+$' || true)
+  if [ -n "$LOCK_PID" ]; then
+    if ! kill -0 "$LOCK_PID" 2>/dev/null; then
+      rm -f "$HOME/.config/yui-companion/SingletonLock" "$HOME/.config/yui-companion/SingletonSocket" "$HOME/.config/yui-companion/SingletonCookie" 2>/dev/null || true
+    fi
+  else
+    rm -f "$HOME/.config/yui-companion/SingletonLock" "$HOME/.config/yui-companion/SingletonSocket" "$HOME/.config/yui-companion/SingletonCookie" 2>/dev/null || true
+  fi
+fi
 RUNNING_YUI=$(pgrep -f "electron.*(yui|app\\.asar)" 2>/dev/null || true)
 if [ -z "$RUNNING_YUI" ]; then
   rm -f "$HOME/.config/yui-companion/SingletonLock" "$HOME/.config/yui-companion/SingletonSocket" "$HOME/.config/yui-companion/SingletonCookie" 2>/dev/null || true

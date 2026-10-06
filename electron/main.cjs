@@ -14,28 +14,45 @@ app.commandLine.appendSwitch('js-flags', '--max-old-space-size=128');
 app.commandLine.appendSwitch('disable-renderer-backgrounding');
 app.commandLine.appendSwitch('disable-background-timer-throttling', 'false');
 
-// Clean stale Chromium SingletonLock if the PID is dead
+// Clean stale Chromium SingletonLock if the PID is dead or broken symlink
 function cleanStaleSingletonLock() {
   try {
     const userData = app.getPath('userData');
+    const lockFiles = ['SingletonLock', 'SingletonSocket', 'SingletonCookie'];
     const lockPath = path.join(userData, 'SingletonLock');
-    if (fs.existsSync(lockPath)) {
-      try {
-        const link = fs.readlinkSync(lockPath);
-        const match = link.match(/-(\d+)$/);
-        if (match) {
-          const pid = parseInt(match[1], 10);
-          try {
-            process.kill(pid, 0);
-          } catch (e) {
-            if (e.code === 'ESRCH') {
-              fs.unlinkSync(lockPath);
-              const socketPath = path.join(userData, 'SingletonSocket');
-              if (fs.existsSync(socketPath)) fs.unlinkSync(socketPath);
+    
+    let isStale = false;
+    try {
+      const stat = fs.lstatSync(lockPath);
+      if (stat) {
+        try {
+          const link = fs.readlinkSync(lockPath);
+          const match = link.match(/-(\d+)$/);
+          if (match) {
+            const pid = parseInt(match[1], 10);
+            try {
+              process.kill(pid, 0);
+            } catch (e) {
+              if (e.code === 'ESRCH') {
+                isStale = true;
+              }
             }
+          } else {
+            isStale = true;
           }
+        } catch (e) {
+          isStale = true;
         }
-      } catch (err) {}
+      }
+    } catch (e) {}
+
+    if (isStale) {
+      for (const f of lockFiles) {
+        try {
+          const p = path.join(userData, f);
+          fs.unlinkSync(p);
+        } catch (e) {}
+      }
     }
   } catch (err) {}
 }
@@ -73,7 +90,11 @@ function applyCompositorGeometry(width, height, x, y = 30) {
           if (yui) {
             exec(`hyprctl dispatch resizewindowpixel "exact ${width} ${height},address:${yui.address}"`, () => {
               setTimeout(() => {
-                exec(`hyprctl dispatch movewindowpixel "exact ${x} ${y},address:${yui.address}"`);
+                exec(`hyprctl dispatch movewindowpixel "exact ${x} ${y},address:${yui.address}"`, () => {
+                  exec(`hyprctl dispatch movetoworkspace "active,address:${yui.address}"`, () => {
+                    exec(`hyprctl dispatch pin "address:${yui.address}"`);
+                  });
+                });
               }, 30);
             });
           }
@@ -132,6 +153,10 @@ function createWindow() {
     applyCompositorGeometry(bounds.width, bounds.height, bounds.x, bounds.y);
   });
 
+  mainWindow.on('closed', () => {
+    mainWindow = null;
+  });
+
   // Auto-collapse when user clicks outside the window (onBlur)
   mainWindow.on('blur', () => {
     if (currentMode === 'expanded') {
@@ -182,7 +207,14 @@ function createWindow() {
   });
 
   ipcMain.on('yui:close', () => {
+    try {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.destroy();
+      }
+    } catch (e) {}
+    mainWindow = null;
     app.quit();
+    process.exit(0);
   });
 
   ipcMain.on('yui:minimize', () => {
@@ -329,15 +361,37 @@ process.on('SIGUSR2', toggleExpandMode);
 const gotTheLock = app.requestSingleInstanceLock();
 if (!gotTheLock) {
   app.quit();
+  process.exit(0);
 } else {
   app.on('second-instance', () => {
-    if (mainWindow) {
+    if (!mainWindow || mainWindow.isDestroyed()) {
+      createWindow();
+      return;
+    }
+    try {
       if (process.platform === 'linux' && process.env.WAYLAND_DISPLAY) {
         exec('swaymsg \'[app_id="yui-companion"] scratchpad show, sticky enable, focus\'', () => {});
+      }
+      if (process.env.HYPRLAND_INSTANCE_SIGNATURE) {
+        exec('hyprctl clients -j', (err, stdout) => {
+          if (!err && stdout) {
+            try {
+              const clients = JSON.parse(stdout);
+              const yui = clients.find(c => c.class === 'yui-companion' || (c.class && c.class.toLowerCase().includes('yui')));
+              if (yui) {
+                exec(`hyprctl dispatch movetoworkspace active,address:${yui.address}`, () => {
+                  exec(`hyprctl dispatch pin address:${yui.address}`);
+                });
+              }
+            } catch (e) {}
+          }
+        });
       }
       if (!mainWindow.isVisible()) mainWindow.show();
       if (mainWindow.isMinimized()) mainWindow.restore();
       mainWindow.focus();
+    } catch (e) {
+      createWindow();
     }
   });
 
@@ -345,7 +399,7 @@ if (!gotTheLock) {
     createWindow();
 
     app.on('activate', () => {
-      if (BrowserWindow.getAllWindows().length === 0) {
+      if (!mainWindow || mainWindow.isDestroyed()) {
         createWindow();
       }
     });
@@ -355,5 +409,6 @@ if (!gotTheLock) {
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
     app.quit();
+    process.exit(0);
   }
 });
